@@ -1,0 +1,243 @@
+// CLI harness (node only). `gce <file.yml> [options]` — see USAGE.
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { parseArgs } from 'node:util';
+import { allIncludes, evaluateTree } from './downstream.js';
+import { evaluatePipeline, type ClauseTrace, type JobResult, type PipelineResult, type RuleTrace } from './evaluate/index.js';
+import { extractGates } from './gates.js';
+import { resolveConfig } from './include/resolve.js';
+import type { NormalizedConfig } from './model.js';
+import { normalizeConfig } from './normalize/index.js';
+import { makeScenario, PRESET_KINDS, type PresetKind, type PresetOptions, type Scenario } from './scenario/presets.js';
+import { loadCiYaml } from './yaml/load.js';
+
+const USAGE = `usage: gce <.gitlab-ci.yml> [options]
+  -p, --preset <kind>     ${PRESET_KINDS.join('|')} (alias: mr)   [push]
+  -b, --branch <name>     branch (push/schedule/web/...)              [default branch]
+  -t, --tag <name>        tag name
+      --default-branch    CI_DEFAULT_BRANCH                           [main]
+      --mr-source/--mr-target <branch>, --mr-labels a,b
+      --open-mr           branch has an open MR (CI_OPEN_MERGE_REQUESTS)
+      --protected / --new-branch
+  -s, --set KEY=VALUE     project/pipeline variable (repeatable)
+      --changed a,b       changed files for changes: (default: assume changed)
+      --files a,b         repo files for exists: (default: assume exist)
+      --override ID=bool  force a clause, e.g. unit-tests#2.changes=false
+  -i, --input KEY=VALUE   pipeline input for spec:inputs (repeatable)
+      --include-dir DIR   provide local include files (DIR = repository root)
+      --include KEY=PATH  provide one include file, e.g. project:grp/tpl:ci.yml=./ci.yml
+                          (KEY: local:<path>, project:<group/proj>:<file>, remote:<url>,
+                           template:<name>, component:<address>, artifact:<job>:<path>)
+      --trace             show rule traces
+      --gates             list gate variables
+      --matrix            jobs × presets overview
+      --json              machine-readable output`;
+
+export interface CliResult { code: number; out: string }
+
+const list = (s?: string) => (s ? s.split(',').map((x) => x.trim()).filter(Boolean) : undefined);
+const kv = (arr: string[] | undefined, what: string) => Object.fromEntries((arr ?? []).map((s) => {
+  const i = s.indexOf('=');
+  if (i <= 0) throw new Error(`${what}: expected KEY=VALUE, got "${s}"`);
+  return [s.slice(0, i), s.slice(i + 1)];
+}));
+
+export function runCli(argv: string[]): CliResult {
+  let a;
+  try {
+    a = parseArgs({
+      args: argv, allowPositionals: true,
+      options: {
+        preset: { type: 'string', short: 'p', default: 'push' },
+        branch: { type: 'string', short: 'b' }, tag: { type: 'string', short: 't' },
+        'default-branch': { type: 'string' }, 'mr-source': { type: 'string' }, 'mr-target': { type: 'string' },
+        'mr-labels': { type: 'string' }, 'open-mr': { type: 'boolean' }, protected: { type: 'boolean' },
+        'new-branch': { type: 'boolean' }, set: { type: 'string', short: 's', multiple: true },
+        changed: { type: 'string' }, files: { type: 'string' }, override: { type: 'string', multiple: true },
+        input: { type: 'string', short: 'i', multiple: true }, 'include-dir': { type: 'string' }, include: { type: 'string', multiple: true },
+        trace: { type: 'boolean' }, gates: { type: 'boolean' }, matrix: { type: 'boolean' }, json: { type: 'boolean' },
+        help: { type: 'boolean', short: 'h' },
+      },
+    });
+  } catch (e) {
+    return { code: 2, out: `${(e as Error).message}\n${USAGE}` };
+  }
+  const { values: o, positionals } = a;
+  if (o.help) return { code: 0, out: USAGE };
+  if (positionals.length !== 1) return { code: 2, out: USAGE };
+
+  let text: string;
+  try { text = readFileSync(positionals[0]!, 'utf8'); } catch (e) { return { code: 2, out: (e as Error).message }; }
+
+  const kind = (o.preset === 'mr' ? 'merge_request_event' : o.preset) as PresetKind;
+  if (!PRESET_KINDS.includes(kind)) return { code: 2, out: `unknown preset ${o.preset}\n${USAGE}` };
+  const opts: PresetOptions = {
+    branch: o.branch, tag: o.tag, defaultBranch: o['default-branch'], mrSource: o['mr-source'], mrTarget: o['mr-target'],
+    mrLabels: list(o['mr-labels']), openMr: o['open-mr'], protected: o.protected, newBranch: o['new-branch'],
+  };
+  let scenario: Scenario;
+  let files: Record<string, string> = {};
+  try {
+    scenario = {
+      ...makeScenario(kind, opts),
+      userVariables: kv(o.set, '--set'),
+      changedFiles: list(o.changed),
+      repoFiles: list(o.files),
+      overrides: Object.fromEntries(Object.entries(kv(o.override, '--override')).map(([k, v]) => [k, v === 'true'])),
+      inputs: kv(o.input, '--input'),
+    };
+    files = { ...(o['include-dir'] ? readIncludeDir(o['include-dir']) : {}) };
+    for (const [k, path] of Object.entries(kv(o.include, '--include'))) files[k] = readFileSync(path, 'utf8');
+  } catch (e) {
+    return { code: 2, out: (e as Error).message };
+  }
+  const loaded = loadCiYaml(text, positionals[0]);
+  const cfgFor = (sc: Scenario) => normalizeConfig(resolveConfig(loaded, { files, scenario: sc }));
+  const cfg = cfgFor(scenario);
+
+  if (o.gates) return { code: 0, out: renderGates(cfg) };
+  if (o.matrix) return { code: 0, out: renderMatrix(cfgFor, opts, scenario) };
+  const result = evaluateTree(cfg, scenario, { files });
+  if (o.json) return { code: 0, out: JSON.stringify({ scenario, result }, null, 2) };
+  return { code: 0, out: renderResult(result, scenario, !!o.trace) };
+}
+
+// ---------------------------------------------------------------------------- rendering
+
+const pad = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - s.length));
+
+function table(rows: string[][]): string {
+  const w = rows[0]!.map((_, i) => Math.max(...rows.map((r) => (r[i] ?? '').length)));
+  return rows.map((r) => r.map((c, i) => (i === r.length - 1 ? c : pad(c, w[i]!))).join('  ').trimEnd()).join('\n');
+}
+
+function sortJobs(jobs: JobResult[], stages: string[]): JobResult[] {
+  return [...jobs].sort((x, y) => stages.indexOf(x.stage) - stages.indexOf(y.stage));
+}
+
+function notes(j: JobResult): string {
+  if (!j.included) return `excluded: ${j.reason}`;
+  const n: string[] = [];
+  if (j.blocking) n.push('blocking');
+  else if (j.allowFailure) n.push('allow_failure');
+  if (j.startIn) n.push(`start_in ${j.startIn}`);
+  if (j.needs) n.push(j.needs.length ? `needs ${j.needs.map((x) => x.job).join(',')}` : 'needs []');
+  if (j.trigger) n.push(`trigger ${j.trigger.kind}${j.trigger.dynamic ? ' (dynamic)' : ''}`);
+  n.push(j.reason);
+  return n.join(' · ');
+}
+
+const mark = (r: RuleTrace) => (!r.evaluated ? '·' : r.matched ? '✓' : '✗');
+const clause = (c: ClauseTrace) =>
+  `${c.kind} ${c.source}${c.expanded && c.expanded !== c.source ? `  ⇒ ${c.expanded}` : ''} = ${c.result}` +
+  `${c.note ? `  (${c.note})` : ''}${c.error ? `  [error: ${c.error}]` : ''}${c.warnings?.length ? `  [warn: ${c.warnings.join('; ')}]` : ''}`;
+
+function ruleLines(rules: RuleTrace[], indent: string): string[] {
+  return rules.map((r) => {
+    const body = r.evaluated && r.clauses.length ? r.clauses.map(clause).join(' AND ') : r.text;
+    return `${indent}#${r.index} ${mark(r)} ${body}${r.when ? `  → ${r.when}` : ''}`.trimEnd();
+  });
+}
+
+function renderResult(r: PipelineResult, sc: Scenario, trace: boolean): string {
+  const out: string[] = [];
+  const ref = sc.refType === 'mr' ? `MR ${sc.ref} → ${sc.variables.CI_MERGE_REQUEST_TARGET_BRANCH_NAME}` : `${sc.refType} ${sc.ref}`;
+  const unresolved = allIncludes(r).filter((i) => !i.resolved && !i.skipped && !i.error);
+  if (unresolved.length) {
+    out.push(`⚠ standalone mode: no GitLab access — ${unresolved.length} include(s) not resolved, results may miss jobs (provide them with --include-dir / --include)`);
+  }
+  const reason = r.invalidConfig ? 'invalid configuration' : r.workflow.reason;
+  out.push(`Pipeline: ${r.created ? 'CREATED' : 'NOT CREATED'} — ${reason}   [${sc.source} · ${ref}]`);
+  if (r.workflow.name) out.push(`Name: ${r.workflow.name}`);
+  if (trace && r.workflow.rules.length) out.push('workflow:', ...ruleLines(r.workflow.rules, '  '));
+  out.push('');
+  out.push(...jobTable(r, ''));
+  if (trace) {
+    out.push('', 'Trace:');
+    for (const j of sortJobs(r.jobs, r.stages)) {
+      out.push(`  ${j.name}`);
+      if (j.trace.mode === 'rules') out.push(...ruleLines(j.trace.rules, '    '));
+      else {
+        for (const c of j.trace.only ?? []) out.push(`    only${j.trace.defaultOnly ? ' (default)' : ''}: ${clause(c)}`);
+        for (const c of j.trace.except ?? []) out.push(`    except: ${clause(c)}`);
+      }
+    }
+  }
+  if (r.errors.length) out.push('', 'Errors:', ...r.errors.map((e) => `  ✗ ${e}`));
+  if (r.warnings.length) out.push('', 'Warnings:', ...r.warnings.map((w) => `  ! ${w}`));
+  return out.join('\n');
+}
+
+function jobTable(r: PipelineResult, indent: string): string[] {
+  const rows = [['STAGE', 'JOB', 'WHEN', 'NOTES']];
+  for (const j of sortJobs(r.jobs, r.stages)) rows.push([j.stage, j.name, j.included ? j.when : '—', notes(j)]);
+  const out = table(rows).split('\n').map((l) => indent + l);
+  for (const j of sortJobs(r.jobs, r.stages)) {
+    const d = j.downstream;
+    if (!d) continue;
+    const head = `${indent}⤷ child pipeline of ${j.name}: `;
+    if (d.error || !d.result) { out.push('', `${head}NOT CREATED — ${d.error}`); continue; }
+    const c = d.result;
+    out.push('', `${head}${c.created ? 'CREATED' : 'NOT CREATED'} — ${c.invalidConfig ? 'invalid configuration' : c.workflow.reason}   [parent_pipeline]`);
+    out.push(...jobTable(c, `${indent}    `));
+    for (const e of c.errors) out.push(`${indent}    ✗ ${e}`);
+  }
+  return out;
+}
+
+function renderGates(cfg: NormalizedConfig): string {
+  const rows = [['VARIABLE', 'KIND', 'YAML', 'COMPARED WITH', 'USED BY']];
+  for (const g of extractGates(cfg)) {
+    const cmp = [...g.values.map((v) => JSON.stringify(v)), ...g.patterns, ...g.comparedWith.map((v) => `$${v}`), ...(g.nullCompared ? ['null'] : []), ...(g.truthiness ? ['(set?)'] : [])];
+    rows.push([g.name, g.predefined ? 'predef' : 'custom', g.yamlValue ?? '', cmp.join(' '), g.usedBy.join(', ')]);
+  }
+  return table(rows);
+}
+
+const CELL: Record<string, string> = { on_success: '●', manual: 'M', delayed: 'D', always: 'A', on_failure: 'F' };
+
+function renderMatrix(cfgFor: (sc: Scenario) => NormalizedConfig, o: PresetOptions, base: Scenario): string {
+  const def = o.defaultBranch ?? 'main';
+  const cols: [string, Scenario][] = [
+    [`push:${def}`, makeScenario('push', { ...o, branch: def })],
+    ['push:feature', makeScenario('push', { ...o, branch: o.branch && o.branch !== def ? o.branch : 'feature/x' })],
+    ['mr', makeScenario('merge_request_event', { ...o, mrSource: o.mrSource ?? 'feature/x' })],
+    ['tag', makeScenario('tag', { ...o, tag: o.tag ?? 'v1.0.0' })],
+    // Branch columns: a --tag would turn any non-push preset into a tag pipeline.
+    ['schedule', makeScenario('schedule', { ...o, branch: def, tag: undefined })],
+    ['web', makeScenario('web', { ...o, branch: def, tag: undefined })],
+  ];
+  const results = cols.map(([, s]) => {
+    const sc = { ...s, userVariables: base.userVariables, changedFiles: base.changedFiles, repoFiles: base.repoFiles, overrides: base.overrides, inputs: base.inputs };
+    return evaluatePipeline(cfgFor(sc), sc);
+  });
+  const cfg = cfgFor(base);
+  const rows = [['JOB', ...cols.map(([n], i) => `${n}${results[i]!.created ? '' : '✗'}`)]];
+  // Union: include:rules can add/remove jobs per column.
+  const seen = new Map<string, JobResult>();
+  for (const r of results) for (const j of r.jobs) if (!seen.has(j.name)) seen.set(j.name, j);
+  const stages = [...new Set([...cfg.stages, ...results.flatMap((r) => r.stages)])];
+  for (const { name } of sortJobs([...seen.values()], stages)) {
+    rows.push([name, ...results.map((r) => {
+      const j = r.jobs.find((x) => x.name === name);
+      if (!j) return '–';
+      return j.included ? (CELL[j.when] ?? '?') + (j.blocking ? '!' : '') : '·';
+    })]);
+  }
+  return `${table(rows)}\n\n● on_success  M manual (M! blocking)  D delayed  A always  F on_failure  · excluded  – not in config  ✗ pipeline not created`;
+}
+
+/** Every .yml/.yaml under DIR as `local:<relative path>`. */
+function readIncludeDir(dir: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== '.git' && e.name !== 'node_modules') walk(p); } else if (/\.ya?ml$/i.test(e.name)) {
+        out[`local:${relative(dir, p).split('\\').join('/')}`] = readFileSync(p, 'utf8');
+      }
+    }
+  };
+  walk(dir);
+  return out;
+}

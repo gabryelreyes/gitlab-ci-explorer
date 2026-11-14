@@ -1,0 +1,83 @@
+# Typical embedded FW pipeline: MR pipelines + default-branch + tags, no duplicate pipelines.
+workflow:
+  name: "$CI_COMMIT_REF_NAME ($CI_PIPELINE_SOURCE)"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+stages: [build, test, package, deploy]
+
+variables:
+  TARGET: stm32f4
+  RUN_HIL: "false"
+
+.rules-mr-or-main: &mr_or_main
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+.build:
+  stage: build
+  image: arm-gcc:13
+  script: [make TARGET=$TARGET]
+  artifacts: {paths: [build/]}
+
+default:
+  tags: [docker]
+  interruptible: true
+
+build:fw:
+  extends: .build
+  rules: *mr_or_main
+
+build:release:
+  extends: .build
+  variables: {BUILD_TYPE: release}
+  rules:
+    - if: $CI_COMMIT_TAG
+
+unit-tests:
+  stage: test
+  needs: [build:fw]
+  script: [ctest]
+  rules:
+    - !reference [.rules-mr-or-main]
+    - changes: ["src/**/*", "tests/**/*"]
+
+hil-tests:
+  stage: test
+  needs: [build:fw]
+  script: [./hil.sh]
+  tags: [hil-rack]
+  rules:
+    - if: $RUN_HIL == "true"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+
+package:
+  stage: package
+  needs: [build:release]
+  script: [./package.sh]
+  rules:
+    - if: $CI_COMMIT_TAG
+
+deploy:prod:
+  stage: deploy
+  needs: [package]
+  script: [./deploy.sh]
+  environment: production
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+
+nightly-cleanup:
+  stage: .post
+  script: [./cleanup.sh]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: always

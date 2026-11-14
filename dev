@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run any command inside the dev container, e.g. ./dev npm test
+exec docker compose -p gitlab-ci-explorer-dev -f "$(dirname "$0")/compose.dev.yaml" run --rm dev "$@"

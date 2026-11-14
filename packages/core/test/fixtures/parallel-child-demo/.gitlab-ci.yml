@@ -1,0 +1,67 @@
+# Demo: parallel:matrix, parallel: N, and child pipelines (static + dynamic).
+stages: [build, test, deploy]
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+build:
+  stage: build
+  script: make TARGET=$TARGET MODE=$MODE
+  parallel:
+    matrix:
+      - TARGET: [stm32f4, esp32]
+        MODE: [debug, release]
+      - TARGET: host
+        MODE: debug
+  artifacts: {paths: [build/]}
+
+unit-tests:
+  stage: test
+  script: ctest --test-dir build -j4
+  parallel: 3
+  needs:
+    - job: build
+      parallel: {matrix: [{TARGET: host, MODE: debug}]}
+
+gen-hil-config:
+  stage: build
+  script: ./tools/gen-hil.py > hil-generated.yml
+  artifacts: {paths: [hil-generated.yml]}
+
+# One child pipeline per target; each waits only for its own release build.
+hil:
+  stage: test
+  variables: {BOARD_POOL: lab-a}
+  parallel:
+    matrix:
+      - TARGET: [stm32f4, esp32]
+  needs:
+    - job: build
+      parallel: {matrix: [{TARGET: '$[[ matrix.TARGET ]]', MODE: release}]}
+  trigger:
+    include: ci/hil-child.yml
+    strategy: depend
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+    - when: on_success
+
+# Dynamic child pipeline from a generated file (paste it under Includes).
+flash-matrix:
+  stage: test
+  needs: [gen-hil-config]
+  trigger:
+    include:
+      - artifact: hil-generated.yml
+        job: gen-hil-config
+
+release:
+  stage: deploy
+  script: ./release.sh $FW_VERSION
+  needs: [build]
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/

@@ -1,0 +1,15 @@
+# Dev toolchain container. Usage: ./dev npm test   |   ./dev npm run gce -w @gce/core -- file.yml
+services:
+  dev:
+    image: node:26-bookworm-slim
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /work
+    volumes:
+      - .:/work
+    environment:
+      HOME: /home/node
+      npm_config_cache: /work/.cache/npm
+      npm_config_update_notifier: "false"
+      # Internal CA (only if npm registry access goes through it):
+      # NODE_EXTRA_CA_CERTS: /certs/internal-ca.pem
+    init: true

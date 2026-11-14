@@ -1,0 +1,8 @@
+# Review deployment: static SPA only (no GitLab access by design).
+services:
+  web:
+    build: .
+    image: gitlab-ci-explorer-web:dev
+    ports:
+      - "8090:80"
+    restart: unless-stopped

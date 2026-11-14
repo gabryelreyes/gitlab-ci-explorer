@@ -1,0 +1,19 @@
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+
+stages: [flash, test]
+
+flash:
+  stage: flash
+  script: ./flash.sh $TARGET $BOARD_POOL
+
+smoke:
+  stage: test
+  script: pytest tests/hil/smoke --target $TARGET
+
+low-power:
+  stage: test
+  script: pytest tests/hil/low_power
+  rules:
+    - if: $TARGET == "stm32f4"
