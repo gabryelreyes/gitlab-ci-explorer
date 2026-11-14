@@ -18,6 +18,9 @@ export function ScenarioPanel({ ui, setUi, gates, scenario, inputSpecs }: Props)
   };
   const isMr = ui.kind === 'merge_request_event';
   const isTag = ui.kind === 'tag';
+  // Effective protection; an explicit choice is kept only while it differs from GitLab's default for the ref.
+  const isProtected = scenario.variables.CI_COMMIT_REF_PROTECTED === 'true';
+  const defaultProtected = scenario.refType === 'branch' && scenario.ref === scenario.variables.CI_DEFAULT_BRANCH;
 
   const gateRow = (g: Gate) => {
     const override = ui.userVars[g.name];
@@ -96,7 +99,7 @@ export function ScenarioPanel({ ui, setUi, gates, scenario, inputSpecs }: Props)
         {ui.kind === 'push' && (
           <label className="check"><input type="checkbox" checked={!!o.openMr} onChange={(e) => setOpt('openMr', e.target.checked)} /> open MR for branch</label>
         )}
-        <label className="check"><input type="checkbox" checked={!!o.protected} onChange={(e) => setOpt('protected', e.target.checked || undefined)} /> protected ref</label>
+        <label className="check"><input type="checkbox" checked={isProtected} onChange={(e) => setOpt('protected', e.target.checked === defaultProtected ? undefined : e.target.checked)} /> protected ref</label>
         {ui.kind === 'push' && (
           <label className="check"><input type="checkbox" checked={!!o.newBranch} onChange={(e) => setOpt('newBranch', e.target.checked)} /> new branch</label>
         )}

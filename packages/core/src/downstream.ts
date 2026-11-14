@@ -5,6 +5,7 @@ import { evaluatePipeline, type JobResult, type PipelineResult } from './evaluat
 import { resolveConfig } from './include/resolve.js';
 import type { IncludeRef, NormalizedConfig } from './model.js';
 import { normalizeConfig } from './normalize/index.js';
+import { isPlainObject } from './util/merge.js';
 import type { Scenario } from './scenario/presets.js';
 
 /** CreateDownstreamPipelineService::MAX_NESTED_CHILDREN */
@@ -35,11 +36,19 @@ export function childConfig(job: JobResult, sc: Scenario, parentJobs: string[], 
   return normalizeConfig(resolveConfig(main, { files: opts.files, scenario: sc, label, parentJobs }));
 }
 
+/** Job declares an artifacts archive (`artifacts:paths` / `untracked`) — `include:artifact` can only read from those. */
+function hasArtifacts(raw: Record<string, unknown>): boolean {
+  const a = raw.artifacts;
+  if (!isPlainObject(a)) return false;
+  return ([] as unknown[]).concat(a.paths ?? []).length > 0 || a.untracked === true;
+}
+
 /** evaluatePipeline + downstream child pipelines of included trigger jobs. */
 export function evaluateTree(cfg: NormalizedConfig, sc: Scenario, opts: TreeOptions = {}, depth = 0, prefix = ''): PipelineResult {
   const r = evaluatePipeline(cfg, sc);
   if (!r.created) return r;
-  const running = r.jobs.filter((j) => j.included).map((j) => j.name);
+  const producers = new Set(cfg.jobs.filter((j) => hasArtifacts(j.raw)).map((j) => j.name));
+  const running = r.jobs.filter((j) => j.included && producers.has(j.name)).map((j) => j.name);
   for (const j of r.jobs) {
     if (!j.included || j.trigger?.kind !== 'child') continue;
     if (depth >= MAX_NESTED_CHILDREN) { j.downstream = { error: 'You reached the maximum depth of child pipelines' }; continue; }

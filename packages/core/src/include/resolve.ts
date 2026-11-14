@@ -21,7 +21,7 @@ export interface ResolveOptions {
   scenario?: Scenario;
   /** Name of the including config in IncludeRef.from (default `.gitlab-ci.yml`; the trigger job for child pipelines). */
   label?: string;
-  /** Child pipeline: jobs of the parent pipeline that run (for `include:artifact`). */
+  /** Child pipeline: jobs of the parent pipeline that run and declare artifacts (for `include:artifact`). */
   parentJobs?: string[];
 }
 
@@ -59,7 +59,14 @@ function parseIncludeRules(v: unknown, errors: string[]): Rule[] | undefined {
     if (unknown.length) errors.push(`include:rule config contains unknown keys: ${unknown.join(', ')}`);
     const rule: Rule = {};
     if (typeof r.if === 'string') rule.if = r.if;
-    const paths = (x: unknown): PathsClause => (isPlainObject(x) ? { paths: ([] as unknown[]).concat(x.paths ?? []).map(String) } : { paths: ([] as unknown[]).concat(x).map(String) });
+    const paths = (x: unknown): PathsClause => {
+      if (!isPlainObject(x)) return { paths: ([] as unknown[]).concat(x).map(String) };
+      const c: PathsClause = { paths: ([] as unknown[]).concat(x.paths ?? []).map(String) };
+      if (x.compare_to !== undefined) c.compareTo = String(x.compare_to);
+      if (x.project !== undefined) c.project = String(x.project);
+      if (x.ref !== undefined) c.ref = String(x.ref);
+      return c;
+    };
     if (r.exists !== undefined) rule.exists = paths(r.exists);
     if (r.changes !== undefined) rule.changes = paths(r.changes);
     if (r.when !== undefined) {
@@ -118,6 +125,7 @@ export function resolveConfig(main: LoadedYaml, opts: ResolveOptions = {}): Reso
 
       // Location expansion (one ref per file)
       const refs: IncludeRef[] = [];
+      let artifactJob = '';
       const mk = (file: string, key: string, target: string, extra: Partial<IncludeRef> = {}): IncludeRef =>
         ({ type, file, key, target, from: ctx.label, resolved: false, ...(inputs && { inputs }), ...extra });
       const localKey = (p: string) => (ctx.project ? `project:${ctx.project}:${p}` : `local:${p}`);
@@ -148,7 +156,7 @@ export function resolveConfig(main: LoadedYaml, opts: ResolveOptions = {}): Reso
         refs.push(mk(c, `component:${c}`, c));
       } else {
         const a = stripSlash(str(e.artifact));
-        const j = e.job === undefined ? '' : str(e.job);
+        const j = artifactJob = e.job === undefined ? '' : str(e.job);
         refs.push(mk(a, `artifact:${j}:${a}`, j ? `${j}:${a}` : a));
       }
 
@@ -170,7 +178,7 @@ export function resolveConfig(main: LoadedYaml, opts: ResolveOptions = {}): Reso
         count += 1;
         if (count > MAX_INCLUDES) { err(ref, `Maximum of ${MAX_INCLUDES} nested includes are allowed!`); throw new Abort(); }
         if (type === 'artifact') {
-          const job = ref.key.split(':')[1]!;
+          const job = artifactJob; // not parsed from the key: job names may contain ':'
           if (!opts.parentJobs) { err(ref, 'Including configs from artifacts is only allowed when triggering child pipelines'); continue; }
           if (!job) { err(ref, 'Job must be provided when including configs from artifacts'); continue; }
           if (!opts.parentJobs.includes(job)) { err(ref, `Job \`${job}\` not found in parent pipeline or does not have artifacts!`); continue; }

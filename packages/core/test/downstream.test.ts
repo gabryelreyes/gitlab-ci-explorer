@@ -145,4 +145,25 @@ describe('parallel-child-demo fixture', () => {
     expect(out).toContain('⤷ child pipeline of hil: [esp32]: CREATED');
     expect(out).toMatch(/standalone mode: .* 1 include/);
   });
+
+describe('include:artifact producers', () => {
+  it('accepts a parent job whose name contains a colon', () => {
+    const main = `
+gen:config: {stage: build, script: x, artifacts: {paths: [out.yml]}}
+trig: {stage: test, trigger: {include: [{artifact: out.yml, job: "gen:config"}]}}
+`;
+    const d = child(tree(main, { 'artifact:gen:config:out.yml': CHILD }), 'trig');
+    expect(d.result!.errors).toEqual([]);
+    expect(d.result!.jobs.map((j) => j.name)).toEqual(['fw', 'always']);
+  });
+
+  it('rejects a parent job without artifacts', () => {
+    const main = `
+gen: {stage: build, script: x}
+trig: {stage: test, trigger: {include: [{artifact: out.yml, job: gen}]}}
+`;
+    expect(child(tree(main, { 'artifact:gen:out.yml': CHILD }), 'trig').result!.errors)
+      .toContain('Job \`gen\` not found in parent pipeline or does not have artifacts!');
+  });
+});
 });

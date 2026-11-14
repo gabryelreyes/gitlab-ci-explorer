@@ -1,7 +1,7 @@
 // CI expression parser (Pratt) + evaluator with GitLab/Ruby semantics.
 // Reference: gitlab/lib/gitlab/ci/pipeline/expression/**.
 import { ExprSyntaxError, tokenize, type Token } from './lexer.js';
-import { parseSlashPattern, translateRegex } from './regex.js';
+import { parseSlashPattern, translateRegex, type Matcher } from './regex.js';
 
 export { ExprSyntaxError } from './lexer.js';
 
@@ -88,7 +88,7 @@ function eq(a: Value, b: Value): boolean {
   return a === b;
 }
 
-function toRegex(v: Value, ctx: EvalContext): RegExp | 'substring' | null {
+function toRegex(v: Value, ctx: EvalContext): Matcher | 'substring' | null {
   let src: string, flags: string;
   if (v && typeof v === 'object') ({ source: src, flags } = v);
   else if (typeof v === 'string') {

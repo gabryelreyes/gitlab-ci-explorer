@@ -192,4 +192,22 @@ describe('inputs-demo fixture', () => {
     expect(names({ target: 'esp32', run_hil: 'true' })).toEqual(['build:esp32', 'hil-tests', 'unit-tests']);
     expect(names({}, makeScenario('tag', { tag: 'v1.2.3' }))).toEqual(['build:stm32f4', 'release', 'unit-tests']);
   });
+
+describe('review regressions', () => {
+  it('interpolates several blocks in one string', () => {
+    const cfg = build('include: [{local: t.yml, inputs: {a: x, b: y}}]', {
+      'local:t.yml': 'spec:\n  inputs:\n    a:\n    b:\n---\nj: {script: ["$[[ inputs.a ]]-$[[ inputs.b ]]"]}',
+    });
+    expect(cfg.errors).toEqual([]);
+    expect(job(cfg, 'j')?.raw.script).toEqual(['x-y']);
+  });
+
+  it('include:rules keeps changes:compare_to', () => {
+    const main = 'include:\n  - local: a.yml\n    rules:\n      - changes: {paths: [src/*], compare_to: main}';
+    const files = { 'local:a.yml': 'j: {script: [x]}' };
+    const sched = (changed: string[]) => ({ ...makeScenario('schedule', { branch: 'main' }), changedFiles: changed });
+    expect(job(build(main, files, sched(['docs/a.md'])), 'j')).toBeUndefined();
+    expect(job(build(main, files, sched(['src/a.c'])), 'j')).toBeDefined();
+  });
+});
 });

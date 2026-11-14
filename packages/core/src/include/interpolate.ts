@@ -169,8 +169,9 @@ function evalBlock(data: string, inputs: Record<string, unknown>, ctx: Interpola
 
 /** Interpolate one string; a string that is exactly one block keeps the value's type. */
 function interpString(s: string, inputs: Record<string, unknown>, ctx: InterpolationContext, errors: string[]): unknown {
-  BLOCK.lastIndex = 0;
-  const whole = s.match(/^\$\[\[\s*(\S.*?\S)\s*\]\]$/);
+  // Typed path only when a single block spans the whole string (not `$[[ a ]]-$[[ b ]]`).
+  const blocks = [...s.matchAll(BLOCK)];
+  const whole = blocks.length === 1 && blocks[0]![0] === s ? blocks[0]! : undefined;
   try {
     if (whole) return evalBlock(whole[1]!, inputs, ctx);
     return s.replace(BLOCK, (_m, data: string) => rubyToS(evalBlock(data, inputs, ctx)));

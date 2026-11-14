@@ -203,8 +203,9 @@ function renderMatrix(cfgFor: (sc: Scenario) => NormalizedConfig, o: PresetOptio
     ['push:feature', makeScenario('push', { ...o, branch: o.branch && o.branch !== def ? o.branch : 'feature/x' })],
     ['mr', makeScenario('merge_request_event', { ...o, mrSource: o.mrSource ?? 'feature/x' })],
     ['tag', makeScenario('tag', { ...o, tag: o.tag ?? 'v1.0.0' })],
-    ['schedule', makeScenario('schedule', { ...o, branch: def })],
-    ['web', makeScenario('web', { ...o, branch: def })],
+    // Branch columns: a --tag would turn any non-push preset into a tag pipeline.
+    ['schedule', makeScenario('schedule', { ...o, branch: def, tag: undefined })],
+    ['web', makeScenario('web', { ...o, branch: def, tag: undefined })],
   ];
   const results = cols.map(([, s]) => {
     const sc = { ...s, userVariables: base.userVariables, changedFiles: base.changedFiles, repoFiles: base.repoFiles, overrides: base.overrides, inputs: base.inputs };
@@ -212,14 +213,18 @@ function renderMatrix(cfgFor: (sc: Scenario) => NormalizedConfig, o: PresetOptio
   });
   const cfg = cfgFor(base);
   const rows = [['JOB', ...cols.map(([n], i) => `${n}${results[i]!.created ? '' : '✗'}`)]];
-  const order = sortJobs(results[0]!.jobs, cfg.stages).map((j) => j.name);
-  for (const name of order) {
+  // Union: include:rules can add/remove jobs per column.
+  const seen = new Map<string, JobResult>();
+  for (const r of results) for (const j of r.jobs) if (!seen.has(j.name)) seen.set(j.name, j);
+  const stages = [...new Set([...cfg.stages, ...results.flatMap((r) => r.stages)])];
+  for (const { name } of sortJobs([...seen.values()], stages)) {
     rows.push([name, ...results.map((r) => {
-      const j = r.jobs.find((x) => x.name === name)!;
+      const j = r.jobs.find((x) => x.name === name);
+      if (!j) return '–';
       return j.included ? (CELL[j.when] ?? '?') + (j.blocking ? '!' : '') : '·';
     })]);
   }
-  return `${table(rows)}\n\n● on_success  M manual (M! blocking)  D delayed  A always  F on_failure  · excluded  ✗ pipeline not created`;
+  return `${table(rows)}\n\n● on_success  M manual (M! blocking)  D delayed  A always  F on_failure  · excluded  – not in config  ✗ pipeline not created`;
 }
 
 /** Every .yml/.yaml under DIR as `local:<relative path>`. */

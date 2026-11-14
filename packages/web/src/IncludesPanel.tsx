@@ -8,8 +8,12 @@ interface Props {
   onPasteMerged: () => void;
 }
 
+/** Folder upload: `webkitRelativePath` starts with the selected folder's name; the folder is the repository root. */
+export const uploadPath = (f: { name: string; webkitRelativePath?: string }) =>
+  (f.webkitRelativePath ? f.webkitRelativePath.split('/').slice(1).join('/') : '') || f.name;
+
 const readAll = (list: FileList | null) =>
-  Promise.all([...(list ?? [])].map(async (f) => ({ path: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name, text: await f.text() })));
+  Promise.all([...(list ?? [])].map(async (f) => ({ path: uploadPath(f), text: await f.text() })));
 
 /** Best match of an uploaded path to an unresolved local/project include (longest path suffix). */
 function matchKey(path: string, open: IncludeRef[]): string | undefined {
@@ -88,7 +92,7 @@ export function IncludesPanel({ includes, files, setFiles, onPasteMerged }: Prop
       </p>
       <div className="row">
         <label className="btn">Upload files…<input type="file" multiple hidden onChange={(e) => void upload(e.target.files)} /></label>
-        <label className="btn">Upload folder…<input type="file" hidden onChange={(e) => void upload(e.target.files)} {...{ webkitdirectory: '' }} /></label>
+        <label className="btn" title="Select the repository root: paths are taken relative to it">Upload folder…<input type="file" hidden onChange={(e) => void upload(e.target.files)} {...{ webkitdirectory: '' }} /></label>
         <button className="btn" onClick={onPasteMerged}>Paste merged config…</button>
       </div>
       {note && <p className="small muted">{note}</p>}

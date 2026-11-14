@@ -73,10 +73,25 @@ describe('expression evaluation (GitLab semantics)', () => {
 });
 
 describe('regex translation', () => {
-  it('flags RE2-only constructs', () => {
+  it('supports RE2-only constructs natively', () => {
     const r = evaluateExpression('$A =~ /\\Afoo\\z/', { A: 'foo' });
     expect(r.result).toBe(true);
     const u = evaluateExpression('$A =~ /a+/U', { A: 'aaa' });
-    expect(u.warnings.join()).toMatch(/U/);
+    expect(u.result).toBe(true);
+    expect(u.warnings).toEqual([]);
+  });
+
+  it('uses RE2 semantics: U flag, inline flags, \\Q..\\E, POSIX classes', () => {
+    expect(evaluateExpression('$A =~ /^a+?$/U', { A: 'aaa' }).result).toBe(true);
+    expect(evaluateExpression('$A =~ /(?i)^MAIN$/', { A: 'main' }).result).toBe(true);
+    expect(evaluateExpression('$A =~ /^\\Qa.b\\E$/', { A: 'a.b' }).result).toBe(true);
+    expect(evaluateExpression('$A =~ /^\\Qa.b\\E$/', { A: 'axb' }).result).toBe(false);
+    expect(evaluateExpression('$A =~ /^[[:alpha:]]+$/', { A: 'abc' }).result).toBe(true);
+  });
+
+  it('does not backtrack catastrophically', () => {
+    const t0 = Date.now();
+    expect(evaluateExpression('$A =~ /^(a+)+$/', { A: `${'a'.repeat(50000)}!` }).result).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(2000);
   });
 });

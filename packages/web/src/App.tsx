@@ -35,7 +35,9 @@ const lines = (s: string) => {
 
 export function toScenario(u: UiScenario, kind = u.kind, opts: PresetOptions = u.opts): Scenario {
   const inputs = Object.fromEntries(Object.entries(u.inputs ?? {}).filter(([, v]) => v !== ''));
-  return { ...makeScenario(kind, opts), userVariables: u.userVars, changedFiles: lines(u.changed), repoFiles: lines(u.files), inputs };
+  // The panel keeps a tag for the Tag preset; elsewhere it would turn schedule/web/api/… into tag pipelines.
+  const o = kind === 'tag' ? opts : { ...opts, tag: undefined };
+  return { ...makeScenario(kind, o), userVariables: u.userVars, changedFiles: lines(u.changed), repoFiles: lines(u.files), inputs };
 }
 
 export function scenarioLabel(u: UiScenario): string {
@@ -131,6 +133,7 @@ export function App() {
   const cfg = useMemo(() => cfgFor(scenario), [cfgFor, scenario]);
   const cfgB = useMemo(() => cfgFor(scenarioB), [cfgFor, scenarioB]);
   const gates = useMemo(() => extractGates(cfg), [cfg]);
+  const gatesB = useMemo(() => extractGates(cfgB), [cfgB]);
   // With child pipelines (trigger:include), evaluated from the same file store.
   const result = useMemo(() => evaluateTree(cfg, scenario, { files }), [cfg, scenario, files]);
   const resultB = useMemo(() => evaluateTree(cfgB, scenarioB, { files }), [cfgB, scenarioB, files]);
@@ -228,7 +231,7 @@ export function App() {
             </nav>
           )}
           {editingB
-            ? <ScenarioPanel ui={uiB} setUi={setUiB} gates={gates} scenario={scenarioB} inputSpecs={inputSpecs} />
+            ? <ScenarioPanel ui={uiB} setUi={setUiB} gates={gatesB} scenario={scenarioB} inputSpecs={inputSpecs} />
             : <ScenarioPanel ui={ui} setUi={setUi} gates={gates} scenario={scenario} inputSpecs={inputSpecs} />}
           <Inspector job={job} path={selected} workflow={shown.workflow} onClear={() => setSelected(undefined)} />
         </aside>
