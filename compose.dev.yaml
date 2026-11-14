@@ -10,6 +10,6 @@ services:
       HOME: /home/node
       npm_config_cache: /work/.cache/npm
       npm_config_update_notifier: "false"
-      # Internal CA (needed later for the proxy / GitLab API):
+      # Internal CA (only if npm registry access goes through it):
       # NODE_EXTRA_CA_CERTS: /certs/internal-ca.pem
     init: true

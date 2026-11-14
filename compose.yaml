@@ -1,4 +1,4 @@
-# Review deployment. Later: + proxy service for include:project / CI Lint (milestone 4).
+# Review deployment: static SPA only (no GitLab access by design).
 services:
   web:
     build: .

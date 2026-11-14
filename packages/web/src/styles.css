@@ -118,3 +118,18 @@ details summary { cursor: pointer; }
 .cell.w-excluded { background: none; color: var(--muted); }
 
 ::placeholder { color: var(--muted); opacity: .6; }
+
+.cmp { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.cmp-head { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cmp-side { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--panel); }
+.cmp-side .pill { font-size: 11px; padding: 0 8px; }
+.cmp-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.cmp-table { border-collapse: collapse; width: 100%; }
+.cmp-table th, .cmp-table td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+.cmp-table tbody tr { cursor: pointer; }
+.cmp-table tbody tr.diff { background: color-mix(in srgb, var(--w-manual) 9%, transparent); }
+.cmp-table tbody tr.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cmp-table tbody th { font-weight: 600; word-break: break-all; }
+.state { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.hot { box-shadow: 0 0 0 2px var(--w-manual); border-radius: 3px; }
+.tabs.ab { gap: 6px; background: var(--panel); }

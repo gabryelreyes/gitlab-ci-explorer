@@ -16,3 +16,4 @@ export function analyze(yaml: string, scenario: Scenario, file?: string): Pipeli
 }
 export { extractGates, type Gate } from './gates.js';
 export { pipelineGraph, relatives, type GraphEdge, type PipelineGraph } from './graph.js';
+export { diffPipelines, type JobDiff, type JobField, type JobState, type PipelineDiff } from './diff.js';
