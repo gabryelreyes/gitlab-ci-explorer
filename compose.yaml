@@ -1,0 +1,8 @@
+# Review deployment. Later: + proxy service for include:project / CI Lint (milestone 4).
+services:
+  web:
+    build: .
+    image: gitlab-ci-explorer-web:dev
+    ports:
+      - "8090:80"
+    restart: unless-stopped
