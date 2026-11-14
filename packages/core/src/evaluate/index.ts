@@ -53,6 +53,8 @@ export interface JobResult {
   /** Effective needs (rule override applied, optional-missing dropped); undefined => stage order. */
   needs?: Need[];
   dependencies?: string[];
+  /** Non-optional needs on jobs that exist but were excluded by rules (pipeline error). */
+  missingNeeds?: string[];
   trigger?: Trigger;
   /** Effective variables visible to the job. */
   variables: Record<string, string>;
@@ -301,6 +303,7 @@ export function evaluatePipeline(cfg: NormalizedConfig, sc: Scenario): PipelineR
         if (n.pipeline || n.project) return true; // cross-pipeline: not checked
         if (included.has(n.job)) return true;
         if (!n.optional && d.included && cfg.jobs.some((j) => j.name === n.job)) {
+          (d.missingNeeds ??= []).push(n.job);
           errors.push(`'${d.name}' job needs '${n.job}' job, but '${n.job}' does not exist in the pipeline. ` +
             'This might be because of the only, except, or rules keywords. To need a job that sometimes does not exist in the pipeline, use needs:optional.');
         }

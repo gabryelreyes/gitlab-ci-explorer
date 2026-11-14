@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { Inspector } from './Inspector';
 import { MatrixView } from './MatrixView';
+import { NeedsGraph } from './NeedsGraph';
 import { PipelineView } from './PipelineView';
 import { SAMPLES } from './samples';
 import { ScenarioPanel } from './ScenarioPanel';
@@ -46,7 +47,7 @@ export function App() {
     kind: 'push', opts: { branch: 'main', defaultBranch: 'main', tag: 'v1.0.0', mrSource: 'feature/x', mrTarget: 'main' },
     userVars: {}, changed: '', files: '',
   });
-  const [tab, setTab] = useState<'pipeline' | 'matrix'>('pipeline');
+  const [tab, setTab] = useState<'stages' | 'graph' | 'matrix'>('stages');
   const [selected, setSelected] = useState<string | undefined>();
   const [showExcluded, setShowExcluded] = useState(true);
   const dark = useDark();
@@ -91,16 +92,17 @@ export function App() {
 
         <section className="pane center">
           <nav className="tabs">
-            <button className={tab === 'pipeline' ? 'active' : ''} onClick={() => setTab('pipeline')}>Pipeline</button>
+            <button className={tab === 'stages' ? 'active' : ''} onClick={() => setTab('stages')}>Stages</button>
+            <button className={tab === 'graph' ? 'active' : ''} onClick={() => setTab('graph')}>Needs graph</button>
             <button className={tab === 'matrix' ? 'active' : ''} onClick={() => setTab('matrix')}>Matrix (jobs × pipeline types)</button>
             <span className="spacer" />
-            {tab === 'pipeline' && (
+            {tab === 'stages' && (
               <label className="check"><input type="checkbox" checked={showExcluded} onChange={(e) => setShowExcluded(e.target.checked)} /> show excluded</label>
             )}
           </nav>
-          {tab === 'pipeline'
-            ? <PipelineView result={result} selected={selected} onSelect={setSelected} showExcluded={showExcluded} />
-            : <MatrixView cfg={cfg} ui={ui} onPick={(kind, opts, name) => { setUi({ ...ui, kind, opts }); setSelected(name); setTab('pipeline'); }} />}
+          {tab === 'stages' && <PipelineView result={result} selected={selected} onSelect={setSelected} showExcluded={showExcluded} />}
+          {tab === 'graph' && <NeedsGraph result={result} selected={selected} onSelect={setSelected} dark={dark} />}
+          {tab === 'matrix' && <MatrixView cfg={cfg} ui={ui} onPick={(kind, opts, name) => { setUi({ ...ui, kind, opts }); setSelected(name); setTab('stages'); }} />}
           {(result.errors.length > 0 || result.warnings.length > 0) && (
             <div className="messages">
               {result.errors.map((e, i) => <pre key={`e${i}`} className="msg err">✗ {e}</pre>)}

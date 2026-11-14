@@ -38,6 +38,7 @@ input, select, textarea { background: var(--panel); border: 1px solid var(--line
 .pane { min-height: 0; overflow: auto; border-right: 1px solid var(--line); }
 .pane.editor { overflow: hidden; } .pane.editor > div { height: 100%; }
 .pane.side { border-right: 0; background: var(--panel); }
+.pane.center { display: flex; flex-direction: column; }
 @media (max-width: 1000px) { .panes { grid-template-columns: 1fr; } .pane.editor { height: 40vh; } }
 
 .tabs { display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 1; align-items: center; }
@@ -57,6 +58,19 @@ input, select, textarea { background: var(--panel); border: 1px solid var(--line
 .w-on_success { --c: var(--w-success); } .w-manual { --c: var(--w-manual); } .w-delayed { --c: var(--w-delayed); }
 .w-always { --c: var(--w-always); } .w-on_failure { --c: var(--w-failure); } .w-excluded { --c: var(--w-excl); }
 .job.w-excluded { opacity: .55; }
+.job.rel-dim { opacity: .3; } .job.rel-up, .job.rel-down { box-shadow: 0 0 0 2px var(--sel); }
+.chain-tag { font-size: 11px; color: var(--accent); margin-top: 3px; }
+
+.graph-wrap { flex: 1; min-height: 420px; display: flex; flex-direction: column; }
+.graph-wrap .react-flow { flex: 1; --xy-background-color: var(--bg); }
+.graph-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 12px; align-items: center; border-bottom: 1px solid var(--line); }
+.lg { display: inline-block; width: 22px; height: 0; vertical-align: middle; margin-right: 4px; border-top: 2px solid var(--muted); }
+.lg.dash { border-top-style: dashed; } .lg.miss { border-top: 2px dashed var(--bad); }
+.gjob { display: flex; flex-direction: column; justify-content: center; overflow: hidden; padding: 4px 8px; }
+.gjob .job-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; word-break: normal; }
+.gjob .job-meta { margin-top: 2px; flex-wrap: nowrap; align-items: center; }
+.react-flow__node.selected .gjob { outline: 2px solid var(--accent); }
+.ghandle { opacity: 0; pointer-events: none; }
 .badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 3px; background: var(--c, var(--accent)); color: #fff; }
 .badge.soft { background: var(--chip); color: var(--fg); }
 .badge.block { background: var(--w-failure); }

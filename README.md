@@ -5,7 +5,8 @@
 ## Status
 
 - `packages/core`: parser + rules evaluator + CLI (milestone 1).
-- `packages/web`: first UI (editor, scenario/gate panel, stage view, rule trace, jobs × pipeline-type matrix). Runs the core in the browser.
+- `packages/web`: UI (editor, scenario/gate panel, stage view, needs graph, rule trace, jobs × pipeline-type matrix). Runs the core in the browser (milestone 2).
+  - Needs graph (React Flow + ELK, lazy-loaded): solid = `needs`, dashed = stage order (transitively reduced), red = need on a job excluded by rules. Click a job → its upstream/downstream chain is highlighted in both views.
 - Standalone mode: `include:` entries are listed as unresolved with a visible warning (no GitLab access yet).
 
 Run for review: `docker compose up -d --build` → <http://localhost:8090>

@@ -15,3 +15,4 @@ export function analyze(yaml: string, scenario: Scenario, file?: string): Pipeli
   return evaluatePipeline(normalizeConfig(loadCiYaml(yaml, file)), scenario);
 }
 export { extractGates, type Gate } from './gates.js';
+export { pipelineGraph, relatives, type GraphEdge, type PipelineGraph } from './graph.js';
