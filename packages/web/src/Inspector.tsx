@@ -71,7 +71,7 @@ function Extra({ job }: { job: JobResult }) {
   );
 }
 
-export function Inspector({ job, path, workflow }: { job?: JobResult; path?: string; workflow: WorkflowResult }) {
+export function Inspector({ job, path, workflow, onClear }: { job?: JobResult; path?: string; workflow: WorkflowResult; onClear: () => void }) {
   const customVars = job ? Object.entries(job.variables).filter(([k]) => !/^(CI|GITLAB_CI)$|^CI_/.test(k)) : [];
   return (
     <div className="panel">
@@ -84,7 +84,8 @@ export function Inspector({ job, path, workflow }: { job?: JobResult; path?: str
       {!job && <p className="muted">Click a job to see its rule trace.</p>}
       {job && (
         <>
-          <h3>{job.name} <span className={`badge ${job.included ? '' : 'soft'}`}>{job.included ? job.when : 'excluded'}</span></h3>
+          <h3>{job.name} <span className={`badge ${job.included ? '' : 'soft'}`}>{job.included ? job.when : 'excluded'}</span>{' '}
+            <button className="chip clear" onClick={onClear} title="Clear selection (Esc)">✕</button></h3>
           {path && path !== job.name && <p className="small muted">in child pipeline: {path}</p>}
           <p className="small">{job.reason}{job.blocking ? ' · blocking manual job' : ''}</p>
           <Extra job={job} />

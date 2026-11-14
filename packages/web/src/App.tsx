@@ -74,6 +74,13 @@ export function App() {
   const [edit, setEdit] = useState<'A' | 'B'>('A');
   const [tab, setTab] = useState<Tab>('stages');
   const [selected, setSelected] = useState<string | undefined>();
+  /** Click a job → select; click it again → clear. */
+  const pick = (p: string | undefined) => setSelected((cur) => (p === undefined || p === cur ? undefined : p));
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(undefined); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [showExcluded, setShowExcluded] = useState(true);
   const [loaded, setLoaded] = useState(!location.hash.startsWith(HASH_KEY));
   const [copied, setCopied] = useState(false);
@@ -187,17 +194,20 @@ export function App() {
               </button>
             ))}
             <span className="spacer" />
+            {selected && (tab === 'stages' || tab === 'graph' || tab === 'compare') && (
+              <button className="chip clear" onClick={() => setSelected(undefined)} title="Clear selection (Esc)">✕ {selected}</button>
+            )}
             {tab === 'stages' && (
               <label className="check"><input type="checkbox" checked={showExcluded} onChange={(e) => setShowExcluded(e.target.checked)} /> show excluded</label>
             )}
           </nav>
-          {tab === 'stages' && <PipelineView result={result} selected={selected} onSelect={setSelected} showExcluded={showExcluded} />}
-          {tab === 'graph' && <NeedsGraph result={result} selected={selected} onSelect={setSelected} dark={dark} />}
+          {tab === 'stages' && <PipelineView result={result} selected={selected} onSelect={pick} showExcluded={showExcluded} />}
+          {tab === 'graph' && <NeedsGraph result={result} selected={selected} onSelect={pick} dark={dark} />}
           {tab === 'includes' && <IncludesPanel includes={includes} files={files} setFiles={setFiles} onPasteMerged={() => setPasting('')} />}
           {tab === 'matrix' && <MatrixView cfgFor={cfgFor} ui={ui} onPick={(kind, opts, name) => { setUi({ ...ui, kind, opts }); setSelected(name); setTab('stages'); }} />}
           {tab === 'compare' && (
             <CompareView
-              a={result} b={resultB} uiA={ui} uiB={uiB} selected={selected} onSelect={setSelected}
+              a={result} b={resultB} uiA={ui} uiB={uiB} selected={selected} onSelect={pick}
               onSwap={() => { setUi(uiB); setUiB(ui); }} onCopyAtoB={() => setUiB(ui)}
             />
           )}
@@ -220,7 +230,7 @@ export function App() {
           {editingB
             ? <ScenarioPanel ui={uiB} setUi={setUiB} gates={gates} scenario={scenarioB} inputSpecs={inputSpecs} />
             : <ScenarioPanel ui={ui} setUi={setUi} gates={gates} scenario={scenario} inputSpecs={inputSpecs} />}
-          <Inspector job={job} path={selected} workflow={shown.workflow} />
+          <Inspector job={job} path={selected} workflow={shown.workflow} onClear={() => setSelected(undefined)} />
         </aside>
       </main>
 

@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 interface Props {
   result: PipelineResult;
   selected?: string;
-  onSelect: (path: string) => void;
+  onSelect: (path: string | undefined) => void;
   showExcluded: boolean;
   /** Path prefix of this (child) pipeline's jobs, e.g. `hil: [esp32] › `. */
   prefix?: string;
@@ -40,7 +40,7 @@ export function PipelineView({ result, selected, onSelect, showExcluded, prefix 
   if (!stages.length) return <div className="empty">No jobs to show.</div>;
 
   return (
-    <div className="pview">
+    <div className="pview" onClick={(e) => { if (!prefix && !(e.target as Element).closest('.job')) onSelect(undefined); }}>
       <div className="stages">
         {stages.map((s) => (
           <div key={s} className="stage">
