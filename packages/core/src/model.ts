@@ -92,15 +92,27 @@ export interface Workflow {
   rules?: Rule[];
 }
 
-export type IncludeType = 'local' | 'project' | 'remote' | 'template' | 'component';
+export type IncludeType = 'local' | 'project' | 'remote' | 'template' | 'component' | 'artifact';
 
 /** One `include:` entry (one per file for include:project with a file list). */
 export interface IncludeRef {
   type: IncludeType;
-  /** Display form, e.g. `grp/templates@v2:ci.yml`. */
+  /** Display form, e.g. `grp/templates:ci.yml@v2`. */
   target: string;
-  /** Not resolved: standalone mode (no GitLab access / no local upload yet). */
+  /** Path inside its repository (local/project), URL, template name or component file. */
+  file: string;
+  /** Lookup key in the user-provided file store, e.g. `local:ci/a.yml`, `project:grp/tpl:ci.yml`. */
+  key: string;
+  /** File that declared this include (`.gitlab-ci.yml` or the parent's target). */
+  from: string;
+  /** Content was provided (uploaded/pasted) and merged. */
   resolved: boolean;
+  /** Not included for this scenario (include:rules), with the reason. */
+  skipped?: string;
+  error?: string;
+  inputs?: Record<string, unknown>;
+  /** Local wildcard pattern (matched against provided local files). */
+  wildcard?: boolean;
 }
 
 export interface NormalizedConfig {

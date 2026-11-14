@@ -6,14 +6,23 @@ export * from './evaluate/index.js';
 export * from './scenario/presets.js';
 
 import { evaluatePipeline, type PipelineResult } from './evaluate/index.js';
+import { resolveConfig, type ResolveOptions } from './include/resolve.js';
+import type { NormalizedConfig } from './model.js';
 import { normalizeConfig } from './normalize/index.js';
 import type { Scenario } from './scenario/presets.js';
 import { loadCiYaml } from './yaml/load.js';
 
+/** YAML text + provided include files + scenario (include rules/paths, pipeline inputs) → normalized config. */
+export function buildConfig(yaml: string, opts: ResolveOptions & { file?: string } = {}): NormalizedConfig {
+  return normalizeConfig(resolveConfig(loadCiYaml(yaml, opts.file), opts));
+}
+
 /** One-shot: YAML text + scenario → pipeline result. */
-export function analyze(yaml: string, scenario: Scenario, file?: string): PipelineResult {
-  return evaluatePipeline(normalizeConfig(loadCiYaml(yaml, file)), scenario);
+export function analyze(yaml: string, scenario: Scenario, file?: string, files?: Record<string, string>): PipelineResult {
+  return evaluatePipeline(buildConfig(yaml, { file, files, scenario }), scenario);
 }
 export { extractGates, type Gate } from './gates.js';
 export { pipelineGraph, relatives, type GraphEdge, type PipelineGraph } from './graph.js';
 export { diffPipelines, type JobDiff, type JobField, type JobState, type PipelineDiff } from './diff.js';
+export { resolveConfig, MAIN_FILE, type ResolveOptions, type ResolvedYaml } from './include/resolve.js';
+export { validateInputs, interpolateFile, type InputSpec } from './include/interpolate.js';

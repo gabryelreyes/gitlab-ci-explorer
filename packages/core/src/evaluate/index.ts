@@ -90,8 +90,8 @@ const ZERO_SHA = /^0+$/;
 
 /** Variables as seen by clauses: `raw` for if/variables (GitLab doesn't expand nested vars there),
  *  `expanded` for paths in changes/exists. */
-interface Scope { raw: Record<string, string>; expanded: Record<string, string> }
-const scopeOf = (...layers: VarLayer[]): Scope => ({ raw: rawVariables(...layers), expanded: resolveVariables(...layers) });
+export interface Scope { raw: Record<string, string>; expanded: Record<string, string> }
+export const scopeOf = (...layers: VarLayer[]): Scope => ({ raw: rawVariables(...layers), expanded: resolveVariables(...layers) });
 
 function firstMatch(patterns: string[], files: string[], vars: Record<string, string>): string | undefined {
   const globs = patterns.map((p) => expandString(p, vars));
@@ -142,7 +142,7 @@ export function ruleText(r: Rule): string {
   return parts.join(', ') || '(no conditions)';
 }
 
-function evaluateRules(rules: Rule[], prefix: string, s: Scope, sc: Scenario) {
+export function evaluateRules(rules: Rule[], prefix: string, s: Scope, sc: Scenario) {
   const traces: RuleTrace[] = [];
   let matched: { rule: Rule; index: number } | undefined;
   rules.forEach((rule, index) => {

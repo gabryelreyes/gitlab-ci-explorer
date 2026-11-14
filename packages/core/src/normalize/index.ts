@@ -1,8 +1,9 @@
 // Raw YAML body → NormalizedConfig. Single-file stage of the pipeline:
 // extends → !reference → default/inherit → hidden jobs/stages → typed model.
+import { resolveConfig, type ResolvedYaml } from '../include/resolve.js';
 import type { LoadedYaml } from '../yaml/load.js';
 import {
-  WHEN_VALUES, type IncludeRef, type IncludeType, type Job, type Need, type NormalizedConfig, type PathsClause,
+  WHEN_VALUES, type Job, type Need, type NormalizedConfig, type PathsClause,
   type Policy, type Rule, type Trigger, type VarDef, type When,
 } from '../model.js';
 import { parseExpression } from '../expr/index.js';
@@ -23,20 +24,14 @@ const FLATTEN_KEYS = ['script', 'before_script', 'after_script', 'rules'];
 const DEFAULT_STAGES = ['build', 'test', 'deploy'];
 const RULE_KEYS = new Set(['if', 'changes', 'exists', 'when', 'allow_failure', 'variables', 'needs', 'start_in', 'interruptible']);
 
-export function normalizeConfig(doc: LoadedYaml): NormalizedConfig {
+export function normalizeConfig(input: LoadedYaml): NormalizedConfig {
+  // Unresolved input (no file store / scenario): includes are only listed (standalone mode).
+  const doc: ResolvedYaml = 'includes' in input ? (input as ResolvedYaml) : resolveConfig(input);
   const errors = [...doc.errors];
   const warnings = [...doc.warnings];
-  const cfg: NormalizedConfig = { includes: [], stages: [], variables: {}, workflow: {}, jobs: [], header: doc.header, errors, warnings };
+  const cfg: NormalizedConfig = { includes: doc.includes, stages: [], variables: {}, workflow: {}, jobs: [], header: doc.header, errors, warnings };
   if (doc.errors.length) return cfg;
 
-  if (doc.header) warnings.push('spec:inputs interpolation is not implemented yet; $[[ inputs.* ]] left as-is');
-  if (doc.body.include !== undefined) {
-    cfg.includes = parseIncludes(doc.body.include, errors);
-    if (cfg.includes.length) {
-      warnings.unshift(`Standalone mode (no GitLab access): ${cfg.includes.length} include(s) not resolved — ` +
-        `jobs, templates and variables defined there are missing: ${cfg.includes.map((i) => `${i.type}:${i.target}`).join(', ')}`);
-    }
-  }
 
   const body = resolveReferences(resolveExtends(doc.body, errors), errors);
 
@@ -103,24 +98,6 @@ function validateDependencies(cfg: NormalizedConfig, errors: string[]): void {
     for (const r of job.rules ?? []) checkNeeds(job, r.needs);
     for (const d of job.dependencies ?? []) check(job, d, 'dependency');
   }
-}
-
-function parseIncludes(v: unknown, errors: string[]): IncludeRef[] {
-  const out: IncludeRef[] = [];
-  const add = (type: IncludeType, target: string) => out.push({ type, target, resolved: false });
-  for (const e of Array.isArray(v) ? v : [v]) {
-    if (typeof e === 'string') { add(/^https?:\/\//.test(e) ? 'remote' : 'local', e); continue; }
-    if (!isPlainObject(e)) { errors.push('include config should be a string, a hash, or an array of them'); continue; }
-    if (e.local !== undefined) add('local', String(e.local));
-    else if (e.project !== undefined) {
-      const at = e.ref === undefined ? '' : `@${String(e.ref)}`;
-      for (const f of Array.isArray(e.file) ? e.file : [e.file]) add('project', `${String(e.project)}${at}:${String(f)}`);
-    } else if (e.remote !== undefined) add('remote', String(e.remote));
-    else if (e.template !== undefined) add('template', String(e.template));
-    else if (e.component !== undefined) add('component', String(e.component));
-    else errors.push(`include entry has no local/project/remote/template/component key: ${JSON.stringify(e)}`);
-  }
-  return out;
 }
 
 function checkExpression(expr: string, where: string, errors: string[]): void {

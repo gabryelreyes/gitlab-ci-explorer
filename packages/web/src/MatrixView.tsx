@@ -1,11 +1,11 @@
-import { evaluatePipeline, type NormalizedConfig, type PresetKind, type PresetOptions } from '@gce/core';
+import { evaluatePipeline, type NormalizedConfig, type PresetKind, type PresetOptions, type Scenario } from '@gce/core';
 import { useMemo } from 'react';
 import { toScenario, type UiScenario } from './App';
 import { whenClass } from './PipelineView';
 
-interface Props { cfg: NormalizedConfig; ui: UiScenario; onPick: (kind: PresetKind, opts: PresetOptions, job: string) => void }
+interface Props { cfgFor: (sc: Scenario) => NormalizedConfig; ui: UiScenario; onPick: (kind: PresetKind, opts: PresetOptions, job: string) => void }
 
-export function MatrixView({ cfg, ui, onPick }: Props) {
+export function MatrixView({ cfgFor, ui, onPick }: Props) {
   const o = ui.opts;
   const def = o.defaultBranch || 'main';
   const feature = o.branch && o.branch !== def ? o.branch : 'feature/x';
@@ -18,8 +18,12 @@ export function MatrixView({ cfg, ui, onPick }: Props) {
     ['schedule', 'schedule', { ...o, branch: def }],
     ['web', 'web', { ...o, branch: def }],
   ], [o, def, feature]);
-  const results = useMemo(() => cols.map(([, k, op]) => evaluatePipeline(cfg, toScenario(ui, k, op))), [cols, cfg, ui]);
-  const names = cfg.jobs.map((j) => j.name);
+  const results = useMemo(() => cols.map(([, k, op]) => {
+    const sc = toScenario(ui, k, op);
+    return evaluatePipeline(cfgFor(sc), sc);
+  }), [cols, cfgFor, ui]);
+  // Union: include:rules can add/remove jobs per pipeline type.
+  const names = [...new Set(results.flatMap((r) => r.jobs.map((j) => j.name)))];
 
   return (
     <div className="matrix-wrap">
@@ -39,7 +43,8 @@ export function MatrixView({ cfg, ui, onPick }: Props) {
             <tr key={name}>
               <th>{name}</th>
               {results.map((r, i) => {
-                const j = r.jobs.find((x) => x.name === name)!;
+                const j = r.jobs.find((x) => x.name === name);
+                if (!j) return <td key={i}><span className="muted" title="not in this configuration (include:rules)">–</span></td>;
                 return (
                   <td key={i}>
                     <button className={`cell ${whenClass(j)}`} title={j.reason} onClick={() => onPick(cols[i]![1], cols[i]![2], name)}>

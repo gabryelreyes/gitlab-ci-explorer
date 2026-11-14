@@ -133,3 +133,20 @@ details summary { cursor: pointer; }
 .state { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .hot { box-shadow: 0 0 0 2px var(--w-manual); border-radius: 3px; }
 .tabs.ab { gap: 6px; background: var(--panel); }
+
+.incs { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.inc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.inc { border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 6px; padding: 5px 8px; background: var(--panel); }
+.inc.ok { --c: var(--ok); } .inc.missing { --c: var(--bad); } .inc.skip { --c: var(--w-excl); }
+.inc-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.inc .mark { font-weight: 700; color: var(--c); }
+.inc-target { word-break: break-all; }
+.inc-paste { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; align-items: flex-start; }
+.btn.small { font-size: 11px; padding: 1px 6px; }
+.banner .btn { margin-left: 8px; background: var(--panel); }
+.dialog { position: fixed; inset: 0; background: #0006; display: grid; place-items: center; z-index: 10; }
+.dialog > div { background: var(--panel); border-radius: 8px; padding: 12px; width: min(900px, 92vw); display: flex; flex-direction: column; gap: 8px; }
+.dialog textarea { height: 60vh; font-family: ui-monospace, monospace; font-size: 12px; }
+.inputs-grid { display: flex; flex-direction: column; gap: 6px; }
+.tabs .count { margin-left: 5px; font-size: 10px; padding: 0 5px; border-radius: 8px; background: var(--chip); color: var(--muted); }
+.tabs .count.bad { background: var(--bad); color: #fff; }

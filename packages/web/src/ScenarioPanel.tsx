@@ -1,4 +1,4 @@
-import { PRESET_KINDS, type Gate, type PresetKind, type Scenario } from '@gce/core';
+import { PRESET_KINDS, type Gate, type InputSpec, type PresetKind, type Scenario } from '@gce/core';
 import type { UiScenario } from './App';
 
 const KIND_LABEL: Record<PresetKind, string> = {
@@ -6,9 +6,9 @@ const KIND_LABEL: Record<PresetKind, string> = {
   api: 'API', trigger: 'Trigger token', pipeline: 'Multi-project', parent_pipeline: 'Child pipeline', chat: 'ChatOps', external: 'External CI',
 };
 
-interface Props { ui: UiScenario; setUi: (u: UiScenario) => void; gates: Gate[]; scenario: Scenario }
+interface Props { ui: UiScenario; setUi: (u: UiScenario) => void; gates: Gate[]; scenario: Scenario; inputSpecs?: Record<string, InputSpec | null> }
 
-export function ScenarioPanel({ ui, setUi, gates, scenario }: Props) {
+export function ScenarioPanel({ ui, setUi, gates, scenario, inputSpecs }: Props) {
   const o = ui.opts;
   const setOpt = (k: keyof typeof o, v: unknown) => setUi({ ...ui, opts: { ...o, [k]: v } });
   const setVar = (name: string, value: string | undefined) => {
@@ -45,6 +45,29 @@ export function ScenarioPanel({ ui, setUi, gates, scenario }: Props) {
     );
   };
 
+  const setInput = (name: string, v: string) => setUi({ ...ui, inputs: { ...ui.inputs, [name]: v } });
+  const show = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
+  const inputRow = ([name, spec]: [string, InputSpec | null]) => {
+    const s = spec ?? {};
+    const type = s.type ?? 'string';
+    const v = ui.inputs?.[name] ?? '';
+    const def = s.default === undefined ? undefined : show(s.default);
+    const opts = type === 'boolean' ? ['true', 'false'] : Array.isArray(s.options) && type !== 'array' ? s.options.map(show) : undefined;
+    return (
+      <label key={name} title={s.description}>
+        <span><code>{name}</code> <span className="small muted">{type}{def === undefined ? ' · required' : ''}{s.regex ? ` · /${s.regex}/` : ''}</span></span>
+        {opts ? (
+          <select value={v} onChange={(e) => setInput(name, e.target.value)}>
+            <option value="">{def === undefined ? '— not set —' : `default (${def})`}</option>
+            {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        ) : (
+          <input value={v} placeholder={def === undefined ? 'required' : `default: ${def}`} onChange={(e) => setInput(name, e.target.value)} />
+        )}
+      </label>
+    );
+  };
+
   const custom = gates.filter((g) => !g.predefined);
   const predefined = gates.filter((g) => g.predefined);
 
@@ -78,6 +101,13 @@ export function ScenarioPanel({ ui, setUi, gates, scenario }: Props) {
           <label className="check"><input type="checkbox" checked={!!o.newBranch} onChange={(e) => setOpt('newBranch', e.target.checked)} /> new branch</label>
         )}
       </div>
+
+      {inputSpecs && Object.keys(inputSpecs).length > 0 && (
+        <>
+          <h3>Pipeline inputs <span className="muted small">(spec:inputs; arrays as JSON)</span></h3>
+          <div className="inputs-grid">{Object.entries(inputSpecs).map(inputRow)}</div>
+        </>
+      )}
 
       <h3>Gate variables <span className="muted small">(project / pipeline variables override YAML)</span></h3>
       {custom.length === 0 && <p className="muted small">No custom variables used in rules.</p>}

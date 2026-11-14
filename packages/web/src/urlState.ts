@@ -9,6 +9,8 @@ export interface AppState {
   uiB?: UiScenario;
   tab?: string;
   selected?: string;
+  /** Provided include files (key → content). */
+  files?: Record<string, string>;
 }
 
 async function pipe(data: Uint8Array, stream: CompressionStream | DecompressionStream): Promise<Uint8Array> {

@@ -1,0 +1,29 @@
+# Pipeline inputs + local/project includes. The include files ship with this sample
+# (see the Includes tab); remove one there to see standalone mode.
+spec:
+  inputs:
+    target:
+      type: string
+      default: stm32f4
+      options: [stm32f4, esp32, host]
+    run_hil:
+      type: boolean
+      default: false
+---
+stages: [build, test, deploy]
+
+include:
+  - local: ci/build.yml
+    inputs:
+      target: $[[ inputs.target ]]
+  - local: ci/hil.yml
+    rules:
+      - if: '"$[[ inputs.run_hil ]]" == "true"'
+  - project: grp/ci-templates
+    ref: v2
+    file: release.yml
+
+unit-tests:
+  stage: test
+  needs: ["build:$[[ inputs.target ]]"]
+  script: [ctest]

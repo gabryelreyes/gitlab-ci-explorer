@@ -1,11 +1,12 @@
 import { yaml } from '@codemirror/lang-yaml';
 import CodeMirror from '@uiw/react-codemirror';
 import {
-  evaluatePipeline, extractGates, loadCiYaml, makeScenario, normalizeConfig,
-  type PresetKind, type PresetOptions, type Scenario,
+  buildConfig, evaluatePipeline, extractGates, loadCiYaml, makeScenario,
+  type InputSpec, type NormalizedConfig, type PresetKind, type PresetOptions, type Scenario,
 } from '@gce/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CompareView } from './CompareView';
+import { IncludesPanel } from './IncludesPanel';
 import { Inspector } from './Inspector';
 import { MatrixView } from './MatrixView';
 import { NeedsGraph } from './NeedsGraph';
@@ -20,10 +21,12 @@ export interface UiScenario {
   userVars: Record<string, string>;
   changed: string;
   files: string;
+  /** Pipeline inputs (spec:inputs of the main file), raw text; empty = default. */
+  inputs?: Record<string, string>;
 }
 
-type Tab = 'stages' | 'graph' | 'matrix' | 'compare';
-const TABS: [Tab, string][] = [['stages', 'Stages'], ['graph', 'Needs graph'], ['matrix', 'Matrix (jobs × pipeline types)'], ['compare', 'Compare A/B']];
+type Tab = 'stages' | 'graph' | 'matrix' | 'compare' | 'includes';
+const TABS: [Tab, string][] = [['stages', 'Stages'], ['graph', 'Needs graph'], ['matrix', 'Matrix'], ['compare', 'Compare A/B'], ['includes', 'Includes']];
 
 const lines = (s: string) => {
   const l = s.split('\n').map((x) => x.trim()).filter(Boolean);
@@ -31,7 +34,8 @@ const lines = (s: string) => {
 };
 
 export function toScenario(u: UiScenario, kind = u.kind, opts: PresetOptions = u.opts): Scenario {
-  return { ...makeScenario(kind, opts), userVariables: u.userVars, changedFiles: lines(u.changed), repoFiles: lines(u.files) };
+  const inputs = Object.fromEntries(Object.entries(u.inputs ?? {}).filter(([, v]) => v !== ''));
+  return { ...makeScenario(kind, opts), userVariables: u.userVars, changedFiles: lines(u.changed), repoFiles: lines(u.files), inputs };
 }
 
 export function scenarioLabel(u: UiScenario): string {
@@ -73,6 +77,8 @@ export function App() {
   const [showExcluded, setShowExcluded] = useState(true);
   const [loaded, setLoaded] = useState(!location.hash.startsWith(HASH_KEY));
   const [copied, setCopied] = useState(false);
+  const [files, setFiles] = useState<Record<string, string>>({});
+  const [pasting, setPasting] = useState<string | undefined>();
   const dark = useDark();
 
   // URL hash → state (on load and when a different link is pasted into this tab).
@@ -83,7 +89,7 @@ export function App() {
       const s = await decodeState(location.hash.slice(HASH_KEY.length));
       if (s) {
         lastHash.current = location.hash;
-        setText(s.text); setUi(s.ui); if (s.uiB) setUiB(s.uiB);
+        setText(s.text); setUi(s.ui); if (s.uiB) setUiB(s.uiB); setFiles(s.files ?? {});
         if (s.tab && TABS.some(([t]) => t === s.tab)) setTab(s.tab as Tab);
         setSelected(s.selected);
       }
@@ -98,30 +104,37 @@ export function App() {
   useEffect(() => {
     if (!loaded) return;
     const t = setTimeout(() => {
-      const s: AppState = { v: 1, text, ui, uiB, tab, selected };
+      const s: AppState = { v: 1, text, ui, uiB, tab, selected, files };
       void encodeState(s).then((h) => {
         lastHash.current = HASH_KEY + h;
         history.replaceState(null, '', HASH_KEY + h);
       });
     }, 300);
     return () => clearTimeout(t);
-  }, [loaded, text, ui, uiB, tab, selected]);
+  }, [loaded, text, ui, uiB, tab, selected, files]);
 
-  const cfg = useMemo(() => normalizeConfig(loadCiYaml(text)), [text]);
-  const gates = useMemo(() => extractGates(cfg), [cfg]);
+  // Includes, include:rules and pipeline inputs depend on the scenario → one config per scenario.
+  const cfgFor = useMemo(() => (sc: Scenario): NormalizedConfig => buildConfig(text, { files, scenario: sc }), [text, files]);
+  const inputSpecs = useMemo(() => {
+    const spec = loadCiYaml(text).header?.spec as { inputs?: Record<string, InputSpec | null> } | undefined;
+    return spec?.inputs && typeof spec.inputs === 'object' ? spec.inputs : undefined;
+  }, [text]);
   const scenario = useMemo(() => toScenario(ui), [ui]);
   const scenarioB = useMemo(() => toScenario(uiB), [uiB]);
+  const cfg = useMemo(() => cfgFor(scenario), [cfgFor, scenario]);
+  const cfgB = useMemo(() => cfgFor(scenarioB), [cfgFor, scenarioB]);
+  const gates = useMemo(() => extractGates(cfg), [cfg]);
   const result = useMemo(() => evaluatePipeline(cfg, scenario), [cfg, scenario]);
-  const resultB = useMemo(() => evaluatePipeline(cfg, scenarioB), [cfg, scenarioB]);
+  const resultB = useMemo(() => evaluatePipeline(cfgB, scenarioB), [cfgB, scenarioB]);
   const editingB = tab === 'compare' && edit === 'B';
   const shown = editingB ? resultB : result;
   const job = shown.jobs.find((j) => j.name === selected);
-  const unresolved = result.includes.filter((i) => !i.resolved);
+  const unresolved = shown.includes.filter((i) => !i.resolved && !i.skipped && !i.error);
   const sampleIx = SAMPLES.findIndex((s) => s.text === text);
 
   const onFile = (f: File | undefined) => { if (f) void f.text().then(setText); };
   const copyLink = async () => {
-    const h = HASH_KEY + await encodeState({ v: 1, text, ui, uiB, tab, selected });
+    const h = HASH_KEY + await encodeState({ v: 1, text, ui, uiB, tab, selected, files });
     history.replaceState(null, '', h);
     await navigator.clipboard?.writeText(location.href).catch(() => undefined);
     setCopied(true); setTimeout(() => setCopied(false), 1500);
@@ -134,7 +147,7 @@ export function App() {
       <header className="topbar">
         <strong className="brand">CI Pipeline Explorer</strong>
         <select aria-label="Sample" value={sampleIx < 0 ? 'custom' : String(sampleIx)}
-          onChange={(e) => { const s = SAMPLES[Number(e.target.value)]; if (s) setText(s.text); }}>
+          onChange={(e) => { const s = SAMPLES[Number(e.target.value)]; if (s) { setText(s.text); setFiles(s.files ?? {}); setUi({ ...ui, inputs: {} }); setUiB({ ...uiB, inputs: {} }); } }}>
           {sampleIx < 0 && <option value="custom">— custom config —</option>}
           {SAMPLES.map((s, i) => <option key={s.name} value={i}>{s.name}</option>)}
         </select>
@@ -153,8 +166,9 @@ export function App() {
 
       {unresolved.length > 0 && (
         <div className="banner" role="status">
-          ⚠ <b>Standalone mode</b> — no GitLab access. {unresolved.length} include(s) not resolved; jobs and templates
+          ⚠ <b>Standalone mode</b> — no GitLab access. {unresolved.length} include(s) not provided; jobs and templates
           from them are missing: <code>{unresolved.map((i) => `${i.type}:${i.target}`).join(', ')}</code>
+          {tab !== 'includes' && <button className="btn small" onClick={() => setTab('includes')}>Provide files →</button>}
         </div>
       )}
 
@@ -165,7 +179,11 @@ export function App() {
 
         <section className="pane center">
           <nav className="tabs">
-            {TABS.map(([t, label]) => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{label}</button>)}
+            {TABS.map(([t, label]) => (
+              <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
+                {label}{t === 'includes' && shown.includes.length > 0 && <span className={`count ${unresolved.length ? 'bad' : ''}`}>{shown.includes.filter((i) => i.resolved).length}/{shown.includes.length}</span>}
+              </button>
+            ))}
             <span className="spacer" />
             {tab === 'stages' && (
               <label className="check"><input type="checkbox" checked={showExcluded} onChange={(e) => setShowExcluded(e.target.checked)} /> show excluded</label>
@@ -173,7 +191,8 @@ export function App() {
           </nav>
           {tab === 'stages' && <PipelineView result={result} selected={selected} onSelect={setSelected} showExcluded={showExcluded} />}
           {tab === 'graph' && <NeedsGraph result={result} selected={selected} onSelect={setSelected} dark={dark} />}
-          {tab === 'matrix' && <MatrixView cfg={cfg} ui={ui} onPick={(kind, opts, name) => { setUi({ ...ui, kind, opts }); setSelected(name); setTab('stages'); }} />}
+          {tab === 'includes' && <IncludesPanel includes={shown.includes} files={files} setFiles={setFiles} onPasteMerged={() => setPasting('')} />}
+          {tab === 'matrix' && <MatrixView cfgFor={cfgFor} ui={ui} onPick={(kind, opts, name) => { setUi({ ...ui, kind, opts }); setSelected(name); setTab('stages'); }} />}
           {tab === 'compare' && (
             <CompareView
               a={result} b={resultB} uiA={ui} uiB={uiB} selected={selected} onSelect={setSelected}
@@ -197,11 +216,25 @@ export function App() {
             </nav>
           )}
           {editingB
-            ? <ScenarioPanel ui={uiB} setUi={setUiB} gates={gates} scenario={scenarioB} />
-            : <ScenarioPanel ui={ui} setUi={setUi} gates={gates} scenario={scenario} />}
+            ? <ScenarioPanel ui={uiB} setUi={setUiB} gates={gates} scenario={scenarioB} inputSpecs={inputSpecs} />
+            : <ScenarioPanel ui={ui} setUi={setUi} gates={gates} scenario={scenario} inputSpecs={inputSpecs} />}
           <Inspector job={job} workflow={shown.workflow} />
         </aside>
       </main>
+
+      {pasting !== undefined && (
+        <div className="dialog" role="dialog" aria-label="Paste merged configuration">
+          <div>
+            <b>Paste the full merged configuration</b>
+            <span className="small muted">GitLab → Build → Pipeline editor → <i>Full configuration</i> tab. It already contains every include.</span>
+            <textarea value={pasting} onChange={(e) => setPasting(e.target.value)} autoFocus />
+            <div className="row">
+              <button className="btn" disabled={!pasting.trim()} onClick={() => { setText(pasting); setPasting(undefined); setTab('stages'); }}>Replace editor content</button>
+              <button className="btn" onClick={() => setPasting(undefined)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,8 +1,10 @@
 // CLI harness (node only). `gce <file.yml> [options]` — see USAGE.
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 import { evaluatePipeline, type ClauseTrace, type JobResult, type PipelineResult, type RuleTrace } from './evaluate/index.js';
 import { extractGates } from './gates.js';
+import { resolveConfig } from './include/resolve.js';
 import type { NormalizedConfig } from './model.js';
 import { normalizeConfig } from './normalize/index.js';
 import { makeScenario, PRESET_KINDS, type PresetKind, type PresetOptions, type Scenario } from './scenario/presets.js';
@@ -20,6 +22,11 @@ const USAGE = `usage: gce <.gitlab-ci.yml> [options]
       --changed a,b       changed files for changes: (default: assume changed)
       --files a,b         repo files for exists: (default: assume exist)
       --override ID=bool  force a clause, e.g. unit-tests#2.changes=false
+  -i, --input KEY=VALUE   pipeline input for spec:inputs (repeatable)
+      --include-dir DIR   provide local include files (DIR = repository root)
+      --include KEY=PATH  provide one include file, e.g. project:grp/tpl:ci.yml=./ci.yml
+                          (KEY: local:<path>, project:<group/proj>:<file>, remote:<url>,
+                           template:<name>, component:<address>)
       --trace             show rule traces
       --gates             list gate variables
       --matrix            jobs × presets overview
@@ -46,6 +53,7 @@ export function runCli(argv: string[]): CliResult {
         'mr-labels': { type: 'string' }, 'open-mr': { type: 'boolean' }, protected: { type: 'boolean' },
         'new-branch': { type: 'boolean' }, set: { type: 'string', short: 's', multiple: true },
         changed: { type: 'string' }, files: { type: 'string' }, override: { type: 'string', multiple: true },
+        input: { type: 'string', short: 'i', multiple: true }, 'include-dir': { type: 'string' }, include: { type: 'string', multiple: true },
         trace: { type: 'boolean' }, gates: { type: 'boolean' }, matrix: { type: 'boolean' }, json: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
@@ -59,7 +67,6 @@ export function runCli(argv: string[]): CliResult {
 
   let text: string;
   try { text = readFileSync(positionals[0]!, 'utf8'); } catch (e) { return { code: 2, out: (e as Error).message }; }
-  const cfg = normalizeConfig(loadCiYaml(text, positionals[0]));
 
   const kind = (o.preset === 'mr' ? 'merge_request_event' : o.preset) as PresetKind;
   if (!PRESET_KINDS.includes(kind)) return { code: 2, out: `unknown preset ${o.preset}\n${USAGE}` };
@@ -68,6 +75,7 @@ export function runCli(argv: string[]): CliResult {
     mrLabels: list(o['mr-labels']), openMr: o['open-mr'], protected: o.protected, newBranch: o['new-branch'],
   };
   let scenario: Scenario;
+  let files: Record<string, string> = {};
   try {
     scenario = {
       ...makeScenario(kind, opts),
@@ -75,13 +83,19 @@ export function runCli(argv: string[]): CliResult {
       changedFiles: list(o.changed),
       repoFiles: list(o.files),
       overrides: Object.fromEntries(Object.entries(kv(o.override, '--override')).map(([k, v]) => [k, v === 'true'])),
+      inputs: kv(o.input, '--input'),
     };
+    files = { ...(o['include-dir'] ? readIncludeDir(o['include-dir']) : {}) };
+    for (const [k, path] of Object.entries(kv(o.include, '--include'))) files[k] = readFileSync(path, 'utf8');
   } catch (e) {
     return { code: 2, out: (e as Error).message };
   }
+  const loaded = loadCiYaml(text, positionals[0]);
+  const cfgFor = (sc: Scenario) => normalizeConfig(resolveConfig(loaded, { files, scenario: sc }));
+  const cfg = cfgFor(scenario);
 
   if (o.gates) return { code: 0, out: renderGates(cfg) };
-  if (o.matrix) return { code: 0, out: renderMatrix(cfg, opts, scenario) };
+  if (o.matrix) return { code: 0, out: renderMatrix(cfgFor, opts, scenario) };
   const result = evaluatePipeline(cfg, scenario);
   if (o.json) return { code: 0, out: JSON.stringify({ scenario, result }, null, 2) };
   return { code: 0, out: renderResult(result, scenario, !!o.trace) };
@@ -127,9 +141,9 @@ function ruleLines(rules: RuleTrace[], indent: string): string[] {
 function renderResult(r: PipelineResult, sc: Scenario, trace: boolean): string {
   const out: string[] = [];
   const ref = sc.refType === 'mr' ? `MR ${sc.ref} → ${sc.variables.CI_MERGE_REQUEST_TARGET_BRANCH_NAME}` : `${sc.refType} ${sc.ref}`;
-  const unresolved = r.includes.filter((i) => !i.resolved);
+  const unresolved = r.includes.filter((i) => !i.resolved && !i.skipped && !i.error);
   if (unresolved.length) {
-    out.push(`⚠ standalone mode: no GitLab access — ${unresolved.length} include(s) not resolved, results may miss jobs`);
+    out.push(`⚠ standalone mode: no GitLab access — ${unresolved.length} include(s) not resolved, results may miss jobs (provide them with --include-dir / --include)`);
   }
   const reason = r.invalidConfig ? 'invalid configuration' : r.workflow.reason;
   out.push(`Pipeline: ${r.created ? 'CREATED' : 'NOT CREATED'} — ${reason}   [${sc.source} · ${ref}]`);
@@ -166,7 +180,7 @@ function renderGates(cfg: NormalizedConfig): string {
 
 const CELL: Record<string, string> = { on_success: '●', manual: 'M', delayed: 'D', always: 'A', on_failure: 'F' };
 
-function renderMatrix(cfg: NormalizedConfig, o: PresetOptions, base: Scenario): string {
+function renderMatrix(cfgFor: (sc: Scenario) => NormalizedConfig, o: PresetOptions, base: Scenario): string {
   const def = o.defaultBranch ?? 'main';
   const cols: [string, Scenario][] = [
     [`push:${def}`, makeScenario('push', { ...o, branch: def })],
@@ -176,7 +190,11 @@ function renderMatrix(cfg: NormalizedConfig, o: PresetOptions, base: Scenario): 
     ['schedule', makeScenario('schedule', { ...o, branch: def })],
     ['web', makeScenario('web', { ...o, branch: def })],
   ];
-  const results = cols.map(([, sc]) => evaluatePipeline(cfg, { ...sc, userVariables: base.userVariables, changedFiles: base.changedFiles, repoFiles: base.repoFiles, overrides: base.overrides }));
+  const results = cols.map(([, s]) => {
+    const sc = { ...s, userVariables: base.userVariables, changedFiles: base.changedFiles, repoFiles: base.repoFiles, overrides: base.overrides, inputs: base.inputs };
+    return evaluatePipeline(cfgFor(sc), sc);
+  });
+  const cfg = cfgFor(base);
   const rows = [['JOB', ...cols.map(([n], i) => `${n}${results[i]!.created ? '' : '✗'}`)]];
   const order = sortJobs(results[0]!.jobs, cfg.stages).map((j) => j.name);
   for (const name of order) {
@@ -186,4 +204,19 @@ function renderMatrix(cfg: NormalizedConfig, o: PresetOptions, base: Scenario): 
     })]);
   }
   return `${table(rows)}\n\n● on_success  M manual (M! blocking)  D delayed  A always  F on_failure  · excluded  ✗ pipeline not created`;
+}
+
+/** Every .yml/.yaml under DIR as `local:<relative path>`. */
+function readIncludeDir(dir: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== '.git' && e.name !== 'node_modules') walk(p); } else if (/\.ya?ml$/i.test(e.name)) {
+        out[`local:${relative(dir, p).split('\\').join('/')}`] = readFileSync(p, 'utf8');
+      }
+    }
+  };
+  walk(dir);
+  return out;
 }

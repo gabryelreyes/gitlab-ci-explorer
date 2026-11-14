@@ -1,0 +1,9 @@
+spec:
+  inputs:
+    target:
+---
+"build:$[[ inputs.target ]]":
+  stage: build
+  image: arm-gcc:13
+  script: ["make TARGET=$[[ inputs.target ]]"]
+  artifacts: {paths: [build/]}

@@ -1,0 +1,4 @@
+hil-tests:
+  stage: test
+  tags: [hil-rack]
+  script: [./hil.sh]
