@@ -2,6 +2,7 @@
 #   check:   typecheck · unit tests (JUnit) · self-check (the explorer evaluates this file)
 #   build:   static web bundle (artifact)
 #   package: container image (buildah, no privileged runner); pushed on default branch and tags
+#   deploy:  GitLab Pages (default branch)
 #
 # Internal CA: add a File-type CI/CD variable INTERNAL_CA (PEM). Falls back to the runner's
 # CI_SERVER_TLS_CA_FILE. Used by Node (npm) and by buildah (registry).
@@ -16,7 +17,7 @@ workflow:
   auto_cancel:
     on_new_commit: interruptible
 
-stages: [check, build, package]
+stages: [check, build, package, deploy]
 
 default:
   interruptible: true
@@ -105,3 +106,19 @@ container-image:
           buildah push "$IMAGE:$t"
         done
       fi
+
+# GitLab Pages: publishes the web bundle from the `web` job (relative asset paths → any Pages URL).
+pages:
+  stage: deploy
+  image: $NODE_IMAGE
+  needs: [typecheck, test, web]
+  interruptible: false
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - rm -rf public && cp -r packages/web/dist public
+  artifacts:
+    paths: [public]
+  environment:
+    name: pages
+    url: $CI_PAGES_URL

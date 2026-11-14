@@ -14,6 +14,11 @@
 
 Run for review: `docker compose up -d --build` → <http://localhost:8090>
 
+Static hosting (no backend; built with relative asset paths, so any sub-path works):
+
+- GitHub Pages: `.github/workflows/ci.yml` (check → build → deploy on default branch). Once: Settings → Pages → Source "GitHub Actions".
+- GitLab Pages: `pages` job in `.gitlab-ci.yml` (default branch) → `$CI_PAGES_URL`.
+
 ```
  .gitlab-ci.yml
       │  yaml/load        anchors, <<, !reference tag, spec: header split
