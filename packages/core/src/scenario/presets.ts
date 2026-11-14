@@ -29,6 +29,8 @@ export interface Scenario {
   /** Forced clause results, keyed `<job|workflow>#<ruleIndex>.<changes|exists>` or `<job>#only.changes`. */
   overrides?: Record<string, boolean>;
   inputs?: Record<string, unknown>;
+  /** Child pipelines: the parent's source, which decides whether `changes:` has a diff. */
+  diffSource?: string;
 }
 
 export interface PresetOptions {

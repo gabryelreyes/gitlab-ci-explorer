@@ -60,6 +60,19 @@ export interface Trigger {
   project?: string;
   branch?: string;
   strategy?: string;
+  /** trigger:forward (defaults: yaml_variables true, pipeline_variables false). */
+  forward?: { yaml_variables?: boolean; pipeline_variables?: boolean };
+}
+
+export interface ParallelInfo {
+  /** Job name as written. */
+  group: string;
+  /** 1-based (CI_NODE_INDEX). */
+  instance: number;
+  /** CI_NODE_TOTAL */
+  total: number;
+  /** parallel:matrix values of this instance. */
+  matrix?: Record<string, string>;
 }
 
 export interface Job {
@@ -82,7 +95,8 @@ export interface Job {
   /** `inherit:variables` as written (also filters workflow rule variables). */
   inheritVariables: boolean | string[];
   trigger?: Trigger;
-  parallel?: unknown;
+  /** Instance of a `parallel:` job (expanded by the normalizer). */
+  parallel?: ParallelInfo;
   /** Fully merged job hash (after extends, !reference, default). */
   raw: Record<string, unknown>;
 }

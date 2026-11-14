@@ -19,6 +19,10 @@ export interface ResolveOptions {
   files?: Record<string, string>;
   /** Pipeline scenario: variables for include paths/rules, pipeline inputs, changed/repo files. */
   scenario?: Scenario;
+  /** Name of the including config in IncludeRef.from (default `.gitlab-ci.yml`; the trigger job for child pipelines). */
+  label?: string;
+  /** Child pipeline: jobs of the parent pipeline that run (for `include:artifact`). */
+  parentJobs?: string[];
 }
 
 export type ResolvedYaml = LoadedYaml & { includes: IncludeRef[] };
@@ -143,7 +147,9 @@ export function resolveConfig(main: LoadedYaml, opts: ResolveOptions = {}): Reso
         const c = str(e.component);
         refs.push(mk(c, `component:${c}`, c));
       } else {
-        refs.push(mk(str(e.artifact), `artifact:${str(e.artifact)}`, str(e.artifact)));
+        const a = stripSlash(str(e.artifact));
+        const j = e.job === undefined ? '' : str(e.job);
+        refs.push(mk(a, `artifact:${j}:${a}`, j ? `${j}:${a}` : a));
       }
 
       // Filter (include:rules) — decided per entry, before loading.
@@ -163,7 +169,12 @@ export function resolveConfig(main: LoadedYaml, opts: ResolveOptions = {}): Reso
         // Verifier
         count += 1;
         if (count > MAX_INCLUDES) { err(ref, `Maximum of ${MAX_INCLUDES} nested includes are allowed!`); throw new Abort(); }
-        if (type === 'artifact') { err(ref, 'Including configs from artifacts is only allowed when triggering child pipelines'); continue; }
+        if (type === 'artifact') {
+          const job = ref.key.split(':')[1]!;
+          if (!opts.parentJobs) { err(ref, 'Including configs from artifacts is only allowed when triggering child pipelines'); continue; }
+          if (!job) { err(ref, 'Job must be provided when including configs from artifacts'); continue; }
+          if (!opts.parentJobs.includes(job)) { err(ref, `Job \`${job}\` not found in parent pipeline or does not have artifacts!`); continue; }
+        }
         if (type === 'template' && !ref.file.endsWith('.gitlab-ci.yml')) { err(ref, `Template file \`${ref.file}\` is not a valid location!`); continue; }
         if (type === 'remote' && !URL_RE.test(ref.file)) { err(ref, `Remote file \`${ref.file}\` does not have a valid address!`); continue; }
         if (type === 'component' && !/^[^/@]+\/.+\/[^/@]+@.+$/.test(ref.file)) { err(ref, `Component '${ref.file}' - the component path is not supported`); continue; }
@@ -174,7 +185,8 @@ export function resolveConfig(main: LoadedYaml, opts: ResolveOptions = {}): Reso
         const text = files[ref.key];
         if (text === undefined) continue; // standalone: not provided
         if (!text.trim()) {
-          const kind = type === 'local' ? `Local file \`${ref.file}\`` : type === 'project' ? `Project \`${ref.target.split(':')[0]}\` file \`${ref.file}\`` : `Included file \`${ref.file}\``;
+          const kind = type === 'local' ? `Local file \`${ref.file}\`` : type === 'project' ? `Project \`${ref.target.split(':')[0]}\` file \`${ref.file}\``
+            : type === 'artifact' ? `File \`${ref.file}\`` : `Included file \`${ref.file}\``;
           err(ref, `${kind} is empty!`); continue;
         }
         ref.resolved = true;
@@ -189,7 +201,7 @@ export function resolveConfig(main: LoadedYaml, opts: ResolveOptions = {}): Reso
         }
         const body = interp(doc, inputs, ref.file, component);
         const nested: Ctx =
-          type === 'local' ? { ...ctx, label: ref.target }
+          type === 'local' || type === 'artifact' ? { ...ctx, label: ref.target }
             : type === 'project' ? { project: ref.key.split(':')[1], hasProject: true, vars: ctx.vars, label: ref.target }
               : type === 'component' ? { project: ref.file.split('@')[0]!.split('/').slice(1, -1).join('/').toLowerCase(), hasProject: true, vars: ctx.vars, label: ref.target }
                 : { hasProject: false, vars: ctx.vars && {}, label: ref.target };
@@ -203,7 +215,7 @@ export function resolveConfig(main: LoadedYaml, opts: ResolveOptions = {}): Reso
   const inputs = sc?.inputs && Object.keys(sc.inputs).length ? sc.inputs : undefined;
   const body = interp(main, inputs, MAIN_FILE);
   try {
-    out.body = process(body, { hasProject: true, vars: configVars, label: MAIN_FILE });
+    out.body = process(body, { hasProject: true, vars: configVars, label: opts.label ?? MAIN_FILE });
   } catch (e) {
     if (!(e instanceof Abort)) throw e;
   }

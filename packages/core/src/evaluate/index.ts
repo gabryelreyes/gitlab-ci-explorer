@@ -1,7 +1,7 @@
 // Scenario evaluation: workflow:rules → job rules / only-except → needs validation → pipeline outcome.
 import { evaluateExpression } from '../expr/index.js';
 import { parseSlashPattern, translateRegex } from '../expr/regex.js';
-import type { IncludeRef, Job, Need, NormalizedConfig, PathsClause, Policy, Rule, Trigger, VarDef, When } from '../model.js';
+import type { IncludeRef, Job, Need, NormalizedConfig, ParallelInfo, PathsClause, Policy, Rule, Trigger, VarDef, When } from '../model.js';
 import type { Scenario } from '../scenario/presets.js';
 import { fnmatch } from '../util/fnmatch.js';
 import { expandString, rawVariables, resolveVariables, type VarLayer } from '../vars/expand.js';
@@ -56,10 +56,23 @@ export interface JobResult {
   /** Non-optional needs on jobs that exist but were excluded by rules (pipeline error). */
   missingNeeds?: string[];
   trigger?: Trigger;
+  parallel?: ParallelInfo;
   /** Effective variables visible to the job. */
   variables: Record<string, string>;
+  /** Trigger jobs: expanded YAML variables (global, workflow, job, rule, matrix) — forwarded downstream. */
+  yamlVariables?: Record<string, string>;
+  /** Child pipeline of a trigger:include job (set by evaluateTree). */
+  downstream?: Downstream;
   reason: string;
   trace: JobTrace;
+}
+
+export interface Downstream {
+  /** Scenario the child pipeline is evaluated with (source parent_pipeline + forwarded variables). */
+  scenario?: Scenario;
+  result?: PipelineResult;
+  /** Child pipeline could not be created at all (e.g. nesting depth). */
+  error?: string;
 }
 
 export interface WorkflowResult {
@@ -104,10 +117,12 @@ function changesClause(c: PathsClause, id: string, s: Scope, sc: Scenario): Clau
   if (sc.overrides && id in sc.overrides) return { ...base, result: sc.overrides[id]!, note: 'override' };
   if (!c.compareTo) {
     // Without compare_to GitLab has no diff for these pipelines and treats changes as satisfied.
+    // Child pipelines inherit the parent's push/MR details (Bridge#child_params), hence its diff.
+    const src = sc.diffSource ?? sc.source;
     if (sc.refType === 'tag') return { ...base, result: true, note: 'always true for tag pipelines' };
-    const diffable = sc.source === 'push' || sc.source === 'merge_request_event' || sc.source === 'external_pull_request_event';
-    if (!diffable) return { ...base, result: true, note: `always true for ${sc.source} pipelines` };
-    if (sc.source === 'push' && ZERO_SHA.test(s.expanded.CI_COMMIT_BEFORE_SHA ?? '')) {
+    const diffable = src === 'push' || src === 'merge_request_event' || src === 'external_pull_request_event';
+    if (!diffable) return { ...base, result: true, note: `always true for ${src} pipelines` };
+    if (src === 'push' && ZERO_SHA.test(s.expanded.CI_COMMIT_BEFORE_SHA ?? '')) {
       return { ...base, result: true, note: 'always true for a new branch' };
     }
   }
@@ -227,6 +242,7 @@ function evaluateJob(job: Job, sc: Scenario, wfVars: Record<string, string>, has
     allowFailure: false, blocking: false, variables: scope.expanded, reason: '', trace: { mode: 'rules', rules: [] },
   };
   if (job.trigger) draft.trigger = job.trigger;
+  if (job.parallel) draft.parallel = job.parallel;
   if (job.dependencies) draft.dependencies = job.dependencies;
   let rule: Rule | undefined;
 
@@ -266,6 +282,16 @@ function evaluateJob(job: Job, sc: Scenario, wfVars: Record<string, string>, has
   draft.blocking = draft.included && draft.when === 'manual' && !draft.allowFailure;
   if (draft.when === 'delayed') draft.startIn = rule?.start_in ?? job.startIn;
   draft.declaredNeeds = rule?.needs ?? job.needs;
+  if (job.trigger) {
+    // Bridge#yaml_variables: root (+ workflow) variables after inherit, job, rule and matrix variables.
+    // Values are the YAML definitions, expanded with the job's variables (ExpandableVariableGenerator).
+    const plain = (o: Record<string, string> = {}) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { value: v, expand: true }]));
+    const defs: Record<string, VarDef> = {
+      ...job.inheritedVariables, ...plain(inheritFilter(wfVars, job.inheritVariables)), ...job.variables, ...plain(rule?.variables),
+    };
+    delete defs.CI_NODE_INDEX; delete defs.CI_NODE_TOTAL;
+    draft.yamlVariables = Object.fromEntries(Object.entries(defs).map(([k, d]) => [k, d.expand ? expandString(d.value, draft.variables) : d.value]));
+  }
   return draft;
 }
 

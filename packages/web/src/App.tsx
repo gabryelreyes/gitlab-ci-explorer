@@ -1,7 +1,7 @@
 import { yaml } from '@codemirror/lang-yaml';
 import CodeMirror from '@uiw/react-codemirror';
 import {
-  buildConfig, evaluatePipeline, extractGates, loadCiYaml, makeScenario,
+  allIncludes, buildConfig, evaluateTree, extractGates, findJob, loadCiYaml, makeScenario,
   type InputSpec, type NormalizedConfig, type PresetKind, type PresetOptions, type Scenario,
 } from '@gce/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -124,12 +124,14 @@ export function App() {
   const cfg = useMemo(() => cfgFor(scenario), [cfgFor, scenario]);
   const cfgB = useMemo(() => cfgFor(scenarioB), [cfgFor, scenarioB]);
   const gates = useMemo(() => extractGates(cfg), [cfg]);
-  const result = useMemo(() => evaluatePipeline(cfg, scenario), [cfg, scenario]);
-  const resultB = useMemo(() => evaluatePipeline(cfgB, scenarioB), [cfgB, scenarioB]);
+  // With child pipelines (trigger:include), evaluated from the same file store.
+  const result = useMemo(() => evaluateTree(cfg, scenario, { files }), [cfg, scenario, files]);
+  const resultB = useMemo(() => evaluateTree(cfgB, scenarioB, { files }), [cfgB, scenarioB, files]);
   const editingB = tab === 'compare' && edit === 'B';
   const shown = editingB ? resultB : result;
-  const job = shown.jobs.find((j) => j.name === selected);
-  const unresolved = shown.includes.filter((i) => !i.resolved && !i.skipped && !i.error);
+  const job = findJob(shown, selected);
+  const includes = useMemo(() => allIncludes(shown), [shown]);
+  const unresolved = includes.filter((i) => !i.resolved && !i.skipped && !i.error);
   const sampleIx = SAMPLES.findIndex((s) => s.text === text);
 
   const onFile = (f: File | undefined) => { if (f) void f.text().then(setText); };
@@ -181,7 +183,7 @@ export function App() {
           <nav className="tabs">
             {TABS.map(([t, label]) => (
               <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-                {label}{t === 'includes' && shown.includes.length > 0 && <span className={`count ${unresolved.length ? 'bad' : ''}`}>{shown.includes.filter((i) => i.resolved).length}/{shown.includes.length}</span>}
+                {label}{t === 'includes' && includes.length > 0 && <span className={`count ${unresolved.length ? 'bad' : ''}`}>{includes.filter((i) => i.resolved).length}/{includes.length}</span>}
               </button>
             ))}
             <span className="spacer" />
@@ -191,7 +193,7 @@ export function App() {
           </nav>
           {tab === 'stages' && <PipelineView result={result} selected={selected} onSelect={setSelected} showExcluded={showExcluded} />}
           {tab === 'graph' && <NeedsGraph result={result} selected={selected} onSelect={setSelected} dark={dark} />}
-          {tab === 'includes' && <IncludesPanel includes={shown.includes} files={files} setFiles={setFiles} onPasteMerged={() => setPasting('')} />}
+          {tab === 'includes' && <IncludesPanel includes={includes} files={files} setFiles={setFiles} onPasteMerged={() => setPasting('')} />}
           {tab === 'matrix' && <MatrixView cfgFor={cfgFor} ui={ui} onPick={(kind, opts, name) => { setUi({ ...ui, kind, opts }); setSelected(name); setTab('stages'); }} />}
           {tab === 'compare' && (
             <CompareView
@@ -218,7 +220,7 @@ export function App() {
           {editingB
             ? <ScenarioPanel ui={uiB} setUi={setUiB} gates={gates} scenario={scenarioB} inputSpecs={inputSpecs} />
             : <ScenarioPanel ui={ui} setUi={setUi} gates={gates} scenario={scenario} inputSpecs={inputSpecs} />}
-          <Inspector job={job} workflow={shown.workflow} />
+          <Inspector job={job} path={selected} workflow={shown.workflow} />
         </aside>
       </main>
 

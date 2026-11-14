@@ -9,6 +9,7 @@ import {
 import { parseExpression } from '../expr/index.js';
 import { isPlainObject } from '../util/merge.js';
 import { resolveExtends } from './extends.js';
+import { expandParallel } from './parallel.js';
 import { flattenNested, resolveReferences } from './reference.js';
 
 const GLOBAL_KEYS = new Set([
@@ -71,6 +72,7 @@ export function normalizeConfig(input: LoadedYaml): NormalizedConfig {
     cfg.jobs.push(job);
   }
   if (cfg.jobs.length === 0 && errors.length === 0) errors.push('jobs config should contain at least one visible job');
+  expandParallel(cfg, errors);
   validateDependencies(cfg, errors);
   return cfg;
 }
@@ -126,7 +128,7 @@ function normalizeJob(
     errors.push(`${name} job: chosen stage ${stage} does not exist; available stages are ${cfg.stages.join(', ')}`);
   }
 
-  const trigger = normalizeTrigger(raw.trigger);
+  const trigger = normalizeTrigger(raw.trigger, `jobs:${name}:trigger`, errors);
   if (!('script' in raw) && !('run' in raw) && !trigger) {
     errors.push(`jobs:${name} config should implement the script:, run:, or trigger: keyword`);
   }
@@ -157,7 +159,6 @@ function normalizeJob(
   }
   if (job.when === 'delayed' && !job.startIn && !job.rules) errors.push(`jobs:${name} start in should be specified for delayed job`);
   if (trigger) job.trigger = trigger;
-  if (raw.parallel !== undefined) job.parallel = raw.parallel;
   return job;
 }
 
@@ -267,20 +268,26 @@ function normalizePolicy(v: unknown, where: string, errors: string[]): Policy | 
   return p;
 }
 
-function normalizeTrigger(v: unknown): Trigger | undefined {
+const TRIGGER_INCLUDE_MAX = 3;
+
+function normalizeTrigger(v: unknown, where: string, errors: string[]): Trigger | undefined {
   if (v === undefined) return undefined;
   if (typeof v === 'string') return { kind: 'multi-project', project: v };
   if (!isPlainObject(v)) return undefined;
   const strategy = v.strategy === undefined ? undefined : String(v.strategy);
+  const f = isPlainObject(v.forward) ? v.forward : undefined;
+  const forward = f && Object.fromEntries(['yaml_variables', 'pipeline_variables'].filter((k) => typeof f[k] === 'boolean').map((k) => [k, f[k] as boolean]));
+  const common = { ...(strategy && { strategy }), ...(forward && { forward }) };
   if (v.include !== undefined) {
     const inc = Array.isArray(v.include) ? v.include : [v.include];
+    if (inc.length > TRIGGER_INCLUDE_MAX) errors.push(`${where}:include config is too long (maximum is ${TRIGGER_INCLUDE_MAX})`);
     const dynamic = inc.some((i) => isPlainObject(i) && 'artifact' in i);
-    return { kind: 'child', include: v.include, dynamic, ...(strategy && { strategy }) };
+    return { kind: 'child', include: v.include, dynamic, ...common };
   }
   return {
     kind: 'multi-project',
     project: v.project === undefined ? undefined : String(v.project),
     ...(v.branch !== undefined && { branch: String(v.branch) }),
-    ...(strategy && { strategy }),
+    ...common,
   };
 }

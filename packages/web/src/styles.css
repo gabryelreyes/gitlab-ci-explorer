@@ -1,7 +1,7 @@
 :root {
   --bg: #f7f8fa; --panel: #ffffff; --fg: #1c2330; --muted: #677285; --line: #dde2ea; --accent: #2f6fde;
   --ok: #1f8a4c; --bad: #c4372e; --warn-bg: #fff4d6; --warn-fg: #6b4e00;
-  --w-success: #2e9e5b; --w-manual: #d08a00; --w-delayed: #7a4fd6; --w-always: #2f6fde; --w-failure: #c4372e; --w-excl: #a9b1bf;
+  --w-success: #2e9e5b; --w-manual: #d08a00; --w-delayed: #7a4fd6; --w-always: #2f6fde; --w-failure: #c4372e; --w-excl: #a9b1bf; --w-child: #0f8a8a;
   --chip: #eef1f6; --sel: #2f6fde33;
   font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light;
@@ -10,7 +10,7 @@
   :root:not([data-theme="light"]) {
     --bg: #12151b; --panel: #1a1e26; --fg: #e3e7ee; --muted: #8d97a8; --line: #2c323d; --accent: #6c9cff;
     --ok: #4cc27f; --bad: #ff6f63; --warn-bg: #3a2f10; --warn-fg: #ffd77a;
-    --w-success: #4cc27f; --w-manual: #f0b030; --w-delayed: #a888ff; --w-always: #6c9cff; --w-failure: #ff6f63; --w-excl: #59616e;
+    --w-success: #4cc27f; --w-manual: #f0b030; --w-delayed: #a888ff; --w-always: #6c9cff; --w-failure: #ff6f63; --w-excl: #59616e; --w-child: #3cc6c6;
     --chip: #262c37; --sel: #6c9cff33; color-scheme: dark;
   }
 }
@@ -150,3 +150,17 @@ details summary { cursor: pointer; }
 .inputs-grid { display: flex; flex-direction: column; gap: 6px; }
 .tabs .count { margin-left: 5px; font-size: 10px; padding: 0 5px; border-radius: 8px; background: var(--chip); color: var(--muted); }
 .tabs .count.bad { background: var(--bad); color: #fff; }
+
+/* child pipelines */
+.badge.child { background: var(--w-child); }
+.lg.child { border-top: 2px dotted var(--w-child); }
+.pview { display: flex; flex-direction: column; }
+.child-pl { margin: 4px 12px 12px; border: 1px dashed var(--w-child); border-radius: 8px; }
+.child-pl > header { display: flex; gap: 10px; align-items: center; padding: 6px 10px; flex-wrap: wrap; }
+.child-pl .pill { font-size: 11px; padding: 0 8px; }
+.child-pl .note { padding: 0 10px; }
+.pgroup { width: 100%; height: 100%; border: 1.5px dashed var(--w-child); border-radius: 8px; background: color-mix(in srgb, var(--w-child) 6%, transparent); }
+.pgroup.bad { border-color: var(--bad); }
+.pgroup-title { font-size: 11px; font-weight: 600; padding: 6px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.react-flow__node-pipeline { padding: 0; border: 0; background: transparent; }
+.matrix-vars td:first-child { color: var(--muted); padding-right: 8px; }

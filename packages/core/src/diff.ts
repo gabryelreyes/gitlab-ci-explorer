@@ -1,4 +1,5 @@
 // Compare two evaluated pipelines (same config, different scenarios): which jobs run differently.
+import { flattenJobs, type FlatJob } from './downstream.js';
 import type { PipelineResult } from './evaluate/index.js';
 import type { When } from './model.js';
 
@@ -30,11 +31,12 @@ export interface PipelineDiff {
   changed: number;
 }
 
-const stateOf = (r: PipelineResult, name: string): JobState | undefined => {
-  const j = r.jobs.find((x) => x.name === name);
-  if (!j) return undefined;
+const stateOf = (flat: FlatJob[], name: string): JobState | undefined => {
+  const f = flat.find((x) => x.path === name);
+  if (!f) return undefined;
+  const j = f.job;
   return {
-    included: r.created && j.included,
+    included: f.created && j.included,
     when: j.when,
     blocking: j.blocking,
     allowFailure: j.allowFailure,
@@ -45,17 +47,20 @@ const stateOf = (r: PipelineResult, name: string): JobState | undefined => {
 
 const same = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y);
 
+/** Child pipeline jobs are compared too, named `trigger › job`. */
 export function diffPipelines(a: PipelineResult, b: PipelineResult): PipelineDiff {
-  const names = [...new Set([...a.jobs, ...b.jobs].map((j) => j.name))];
+  const fa = flattenJobs(a);
+  const fb = flattenJobs(b);
+  const names = [...new Set([...fa, ...fb].map((f) => f.path))];
   const jobs = names.map((name): JobDiff => {
-    const sa = stateOf(a, name);
-    const sb = stateOf(b, name);
+    const sa = stateOf(fa, name);
+    const sb = stateOf(fb, name);
     const changes: JobField[] = [];
     if (!!sa?.included !== !!sb?.included) changes.push('included');
     else if (sa?.included && sb?.included) {
       for (const f of ['when', 'blocking', 'allowFailure', 'needs', 'startIn'] as const) if (!same(sa[f], sb[f])) changes.push(f);
     }
-    const stage = (a.jobs.find((j) => j.name === name) ?? b.jobs.find((j) => j.name === name))!.stage;
+    const stage = (fa.find((f) => f.path === name) ?? fb.find((f) => f.path === name))!.job.stage;
     return { name, stage, a: sa, b: sb, changes };
   });
   return { created: [a.created, b.created], jobs, changed: jobs.filter((j) => j.changes.length).length };

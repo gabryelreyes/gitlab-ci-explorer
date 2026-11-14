@@ -2,6 +2,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
+import { allIncludes, evaluateTree } from './downstream.js';
 import { evaluatePipeline, type ClauseTrace, type JobResult, type PipelineResult, type RuleTrace } from './evaluate/index.js';
 import { extractGates } from './gates.js';
 import { resolveConfig } from './include/resolve.js';
@@ -26,7 +27,7 @@ const USAGE = `usage: gce <.gitlab-ci.yml> [options]
       --include-dir DIR   provide local include files (DIR = repository root)
       --include KEY=PATH  provide one include file, e.g. project:grp/tpl:ci.yml=./ci.yml
                           (KEY: local:<path>, project:<group/proj>:<file>, remote:<url>,
-                           template:<name>, component:<address>)
+                           template:<name>, component:<address>, artifact:<job>:<path>)
       --trace             show rule traces
       --gates             list gate variables
       --matrix            jobs × presets overview
@@ -96,7 +97,7 @@ export function runCli(argv: string[]): CliResult {
 
   if (o.gates) return { code: 0, out: renderGates(cfg) };
   if (o.matrix) return { code: 0, out: renderMatrix(cfgFor, opts, scenario) };
-  const result = evaluatePipeline(cfg, scenario);
+  const result = evaluateTree(cfg, scenario, { files });
   if (o.json) return { code: 0, out: JSON.stringify({ scenario, result }, null, 2) };
   return { code: 0, out: renderResult(result, scenario, !!o.trace) };
 }
@@ -141,7 +142,7 @@ function ruleLines(rules: RuleTrace[], indent: string): string[] {
 function renderResult(r: PipelineResult, sc: Scenario, trace: boolean): string {
   const out: string[] = [];
   const ref = sc.refType === 'mr' ? `MR ${sc.ref} → ${sc.variables.CI_MERGE_REQUEST_TARGET_BRANCH_NAME}` : `${sc.refType} ${sc.ref}`;
-  const unresolved = r.includes.filter((i) => !i.resolved && !i.skipped && !i.error);
+  const unresolved = allIncludes(r).filter((i) => !i.resolved && !i.skipped && !i.error);
   if (unresolved.length) {
     out.push(`⚠ standalone mode: no GitLab access — ${unresolved.length} include(s) not resolved, results may miss jobs (provide them with --include-dir / --include)`);
   }
@@ -150,9 +151,7 @@ function renderResult(r: PipelineResult, sc: Scenario, trace: boolean): string {
   if (r.workflow.name) out.push(`Name: ${r.workflow.name}`);
   if (trace && r.workflow.rules.length) out.push('workflow:', ...ruleLines(r.workflow.rules, '  '));
   out.push('');
-  const rows = [['STAGE', 'JOB', 'WHEN', 'NOTES']];
-  for (const j of sortJobs(r.jobs, r.stages)) rows.push([j.stage, j.name, j.included ? j.when : '—', notes(j)]);
-  out.push(table(rows));
+  out.push(...jobTable(r, ''));
   if (trace) {
     out.push('', 'Trace:');
     for (const j of sortJobs(r.jobs, r.stages)) {
@@ -167,6 +166,23 @@ function renderResult(r: PipelineResult, sc: Scenario, trace: boolean): string {
   if (r.errors.length) out.push('', 'Errors:', ...r.errors.map((e) => `  ✗ ${e}`));
   if (r.warnings.length) out.push('', 'Warnings:', ...r.warnings.map((w) => `  ! ${w}`));
   return out.join('\n');
+}
+
+function jobTable(r: PipelineResult, indent: string): string[] {
+  const rows = [['STAGE', 'JOB', 'WHEN', 'NOTES']];
+  for (const j of sortJobs(r.jobs, r.stages)) rows.push([j.stage, j.name, j.included ? j.when : '—', notes(j)]);
+  const out = table(rows).split('\n').map((l) => indent + l);
+  for (const j of sortJobs(r.jobs, r.stages)) {
+    const d = j.downstream;
+    if (!d) continue;
+    const head = `${indent}⤷ child pipeline of ${j.name}: `;
+    if (d.error || !d.result) { out.push('', `${head}NOT CREATED — ${d.error}`); continue; }
+    const c = d.result;
+    out.push('', `${head}${c.created ? 'CREATED' : 'NOT CREATED'} — ${c.invalidConfig ? 'invalid configuration' : c.workflow.reason}   [parent_pipeline]`);
+    out.push(...jobTable(c, `${indent}    `));
+    for (const e of c.errors) out.push(`${indent}    ✗ ${e}`);
+  }
+  return out;
 }
 
 function renderGates(cfg: NormalizedConfig): string {

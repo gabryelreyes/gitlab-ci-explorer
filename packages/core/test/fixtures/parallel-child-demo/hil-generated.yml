@@ -1,0 +1,3 @@
+# Example output of gen-hil-config (dynamic child pipeline).
+flash-board-1: {script: ./flash.sh board-1}
+flash-board-2: {script: ./flash.sh board-2}
